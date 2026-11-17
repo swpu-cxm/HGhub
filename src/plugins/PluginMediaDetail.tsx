@@ -17,6 +17,7 @@ import SourceSwitcher from "./SourceSwitcher";
 import type { SourceStart } from "./sourceMatching";
 import ResolverChooser from "./ResolverChooser";
 import { useStore } from "../store";
+import { invoke } from "@tauri-apps/api/core";
 import { registerBackHandler } from "../back";
 import { setMobileOrientation } from "../orientation";
 import { isMobile } from "../environment";
@@ -357,10 +358,39 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
     {[...new Set(pagedEpisodes.map(e=>e.season))].map(season=><section key={season??"none"}>{season!==undefined&&<h4>{detail?.seasons?.find(s=>s.number===season)?.label||`第 ${season} 季`}</h4>}<div className="hpp-episodes">{pagedEpisodes.filter(e=>e.season===season).map(ep=><button key={ep.id} title={ep.lockReason||ep.title} className={highlighted===ep.id?"selected":""} aria-label={ep.label||`第 ${ep.index} 集`} aria-pressed={highlighted===ep.id} disabled={busy||ep.locked||!canPlay} onClick={()=>beginEpisode(ep)}><span>{ep.episodeNumber??ep.index}</span>{highlighted===ep.id&&<i aria-hidden="true">▮▮▮</i>}{ep.locked&&<small>不可用</small>}</button>)}</div></section>)}
     {!currentList?.episodes.length && <p className="hg-episode-empty">{detail ? "暂无分集，可尝试其他播放列表" : "正在读取分集…"}</p>}
     {currentList?.next && plugin.methods.includes("media.listEpisodes") && <button className="hg-load-episodes" disabled={busy} onClick={()=>void more()}>加载更多分集</button>}</div>;
+  const cacheEpisode = async () => {
+    const ep = current.current?.ep;
+    const listId = current.current?.playlistId || playlist;
+    if (!detail || !ep) { setError("请先选择分集"); return; }
+    setBusy(true);
+    try {
+      const playback = await pluginCommand<{ streams: { url: string; format?: string; headers?: Record<string, string> }[] }>("call", {
+        id: plugin.meta.id,
+        method: "media.resolvePlayback",
+        args: { mediaId, playlistId: listId, episodeId: ep.id, serverId: selection.current.serverId, streamIndex: selection.current.streamIndex, resolverId: selection.current.resolverId, resolverStreamIndex: selection.current.resolverStreamIndex, resolverServers: selection.current.resolverServers },
+      });
+      const pick = playback.streams[selection.current.streamIndex] || playback.streams[0];
+      if (!pick?.url) throw new Error("没有可缓存的播放地址");
+      if (pick.format && pick.format !== "progressive" && pick.format !== "hls") throw new Error("该播放流格式暂不支持离线缓存");
+      await invoke("download_manage", {
+        action: "enqueue",
+        params: {
+          title: detail.title,
+          episodeLabel: ep.label || `第 ${ep.index} 集`,
+          sourceUrl: pick.url,
+          headers: pick.headers || {},
+        },
+      });
+      app.push({ kind: "downloads" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "无法创建缓存任务");
+    } finally { setBusy(false); }
+  };
   const playbackPanel=<><Notice error={error}/><div className="hpp-playback-options" aria-label="播放选择">{choices && <>
     <PlaybackOptions stage="源" choices={choices.source} disabled={busy} onServer={serverId=>selectPlayback({serverId:serverId||undefined,streamIndex:0,resolverStreamIndex:0})} onStream={streamIndex=>selectPlayback({streamIndex,resolverStreamIndex:0})}/>
     {choices.resolver && <PlaybackOptions stage="解析器" choices={choices.resolver} disabled={busy} onServer={serverId=>selectPlayback({resolverServers:{...selection.current.resolverServers,[choices.resolver!.pluginId]:serverId},resolverStreamIndex:0})} onStream={resolverStreamIndex=>selectPlayback({resolverStreamIndex})}/>}</>}
     <button disabled={busy||!active} onClick={refresh}>刷新播放</button><button disabled={busy||!active} onClick={()=>selectPlayback({serverId:undefined,resolverId:undefined,streamIndex:0,resolverStreamIndex:0,resolverServers:{}})}>使用默认播放选择</button>
+    <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集</button>
     <button disabled={busy||!detail} onClick={()=>setSwitching(true)}>换源</button>
     {choices?.resolverRoute && <ResolverChooser key={choices.resolverRoute.host} route={choices.resolverRoute} busy={busy||!active} select={(resolverId,resolverHost)=>{const c=current.current;return c?play(c.ep,"switch",c.playlistId,{...selection.current,resolverId,resolverHost,resolverStreamIndex:0}):Promise.resolve(undefined);}}/>}</div></>;
   const detailPanel=detail?<><div className="legacy-detail-summary">{poster&&<img src={poster} alt=""/>}<div><h2>{detail.title}</h2><p>{plugin.meta.name}</p>{detail.score!==undefined&&<strong>{detail.score.toFixed(1)} 分</strong>}<p>{detail.episodeCount||currentList?.episodes.length||0} 集</p></div></div><h3>简介</h3><p className="hpp-description">{detail.description||"暂无简介"}</p>

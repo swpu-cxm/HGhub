@@ -7,6 +7,7 @@ pub mod ipc;
 pub mod library;
 pub mod manager;
 pub mod media;
+pub mod media_download;
 pub mod model;
 mod native;
 mod network;

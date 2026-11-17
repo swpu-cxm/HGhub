@@ -1,4 +1,5 @@
 mod commands;
+mod download_commands;
 mod logging;
 #[cfg(target_os = "macos")]
 mod macos_titlebar;
@@ -17,6 +18,8 @@ pub fn run() {
                     {
                         let handle = api.register_android_plugin("com.hghub.player", "OrientationPlugin")?;
                         app.manage(commands::OrientationPlugin(handle));
+                        let update = api.register_android_plugin("com.hghub.player", "AppUpdatePlugin")?;
+                        app.manage(commands::AppUpdatePlugin(update));
                     }
                     #[cfg(not(target_os = "android"))]
                     let _ = (app, api);
@@ -39,6 +42,14 @@ pub fn run() {
                     .with_document_reader(std::sync::Arc::new(plugins::PickedDocuments(app.handle().clone()))),
             );
             app.manage(manager.clone());
+            let downloads = std::sync::Arc::new(
+                hghub_hpp::media_download::DownloadManager::open(dir.join("hpp"))?,
+            );
+            let resume = downloads.clone();
+            app.manage(downloads);
+            tauri::async_runtime::spawn(async move {
+                resume.resume_interrupted().await;
+            });
             // The WebView registers its playback capabilities before the first
             // plugin command; eager initialization would expose an incorrect env.
             #[cfg(target_os = "macos")]
@@ -52,7 +63,12 @@ pub fn run() {
             commands::security_set,
             commands::set_orientation,
             commands::debug_log,
-            commands::open_url
+            commands::open_url,
+            download_commands::download_manage,
+            commands::app_update_install,
+            commands::app_update_permissions,
+            commands::app_update_open_install_permission,
+            commands::app_update_download_apk
         ])
         .run(tauri::generate_context!())
         .expect("error while running HGhub");

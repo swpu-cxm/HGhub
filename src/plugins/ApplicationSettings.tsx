@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { checkAppUpdate, type AppRelease } from "../appUpdates";
 import { useStore } from "../store";
-import { APP_VERSION } from "../environment";
+import { APP_VERSION, platform } from "../environment";
+import { UPDATE_GITHUB_OWNER, UPDATE_GITHUB_REPO } from "../updateConfig";
 import { useHost } from "./HostContext";
 import { BrowseFrame, Notice } from "./BrowsePages";
 import { pluginError } from "./client";
@@ -52,6 +53,7 @@ export default function ApplicationSettings({ onBack }: { onBack: () => void }) 
         <Setting icon={<ILockF size={16}/>} title="显示成人内容" description="控制来源中的成人内容展示"><Toggle label="显示成人内容" on={host.prefs.mature} onChange={mature=>host.setPrefs({mature})}/></Setting>
       </Section>
       <Section title="本地数据"><Setting icon={<IHeart size={16}/>} title="我的片库" description={`${host.library.filter(e=>e.favorite).length} 部收藏 · ${host.library.filter(e=>e.lastProgress).length} 条观看记录`}/>
+        <Setting icon={<IRefresh size={16}/>} title="离线缓存" description="查看下载进度与管理本地 MP4"><button onClick={()=>app.push({kind:"downloads"})}>打开缓存管理</button></Setting>
         <details className="px-3.5 py-3 hpp-resolver-preferences" aria-label="解析器站点偏好"><summary className="text-[12.5px] cursor-pointer">解析器站点偏好</summary><div className="mt-3 text-xs text-mut">
           {Object.entries(resolverPrefs).map(([site,id])=><div className="flex gap-2 py-2" key={site}><span className="flex-1 break-all">{site} · {host.plugins.find(p=>p.meta.id===id)?.meta.name||id}</span><button aria-label={`忘记 ${site} 的解析器`} disabled={clearing} onClick={()=>void clearResolver(site)}>忘记</button></div>)}
           {!Object.keys(resolverPrefs).length&&<p>暂无记住的站点。</p>}<button className="mt-3 text-primary" disabled={clearing||!Object.keys(resolverPrefs).length} onClick={()=>void clearResolver()}>清空解析器偏好</button>
@@ -66,7 +68,7 @@ export default function ApplicationSettings({ onBack }: { onBack: () => void }) 
 
 function AppUpdateSetting() {
   const [checking, setChecking] = useState(false), [opening, setOpening] = useState(false);
-  const [message, setMessage] = useState("手动检查 GitHub 正式 Release"), [error, setError] = useState("");
+  const [message, setMessage] = useState(`检查 ${UPDATE_GITHUB_OWNER}/${UPDATE_GITHUB_REPO} 正式 Release`), [error, setError] = useState("");
   const [release, setRelease] = useState<AppRelease | null>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => { active.current?.abort(); active.current = null; }, []);
@@ -90,8 +92,34 @@ function AppUpdateSetting() {
       if (active.current === controller) { active.current = null; setChecking(false); }
     }
   };
+  const install = async () => {
+    if (!release?.apkUrl || opening) return;
+    setOpening(true); setError("");
+    try {
+      if (platform === "android") {
+        const allowed = await invoke<boolean>("app_update_permissions");
+        if (!allowed) {
+          await invoke("app_update_open_install_permission");
+          setError("请先允许本应用安装更新包");
+          return;
+        }
+        const path = await invoke<string>("app_update_download_apk", {
+          url: release.apkUrl,
+          fileName: release.apkName || "HGhub-update.apk",
+          expectedSha256: release.apkSha256 || null,
+        });
+        await invoke("app_update_install", { path });
+        setMessage("已启动系统安装程序");
+      } else {
+        await invoke<void>("open_url", { url: release.url });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "无法安装更新");
+    } finally { setOpening(false); }
+  };
   const open = async () => {
     if (!release || opening) return;
+    if (platform === "android" && release.apkUrl) { await install(); return; }
     setOpening(true); setError("");
     try { await invoke<void>("open_url", { url: release.url }); }
     catch { setError("无法打开浏览器，请重试"); }
@@ -100,7 +128,7 @@ function AppUpdateSetting() {
   return <div>
     <Setting icon={<IRefresh size={16}/>} title="检查更新" description={<span role="status">{message}</span>}>
       <div className="flex flex-col items-end gap-2 text-[12px] text-primary">
-        {release?.available && <button className="pressable disabled:opacity-50" disabled={opening || checking} onClick={() => void open()}>{opening ? "正在打开…" : "前往 Release"}</button>}
+        {release?.available && <button className="pressable disabled:opacity-50" disabled={opening || checking} onClick={() => void open()}>{opening ? "正在处理…" : platform === "android" && release.apkUrl ? "下载并安装" : "前往 Release"}</button>}
         <button className="pressable disabled:opacity-50" disabled={checking || opening} onClick={() => void check()}>{checking ? "检查中…" : release ? "重新检查" : "检查更新"}</button>
       </div>
     </Setting>
