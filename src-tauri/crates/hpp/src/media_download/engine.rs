@@ -66,6 +66,7 @@ impl DownloadManager {
         source_url: String,
         headers: HashMap<String, String>,
         kind: Option<DownloadKind>,
+        source_format: Option<&str>,
     ) -> Result<DownloadTask> {
         {
             let tasks = self.inner.tasks.lock().unwrap();
@@ -79,7 +80,7 @@ impl DownloadManager {
         }
         let kind = match kind {
             Some(k) => k,
-            None => classify_url(&self.inner.client, &source_url, &headers).await,
+            None => classify_url(&self.inner.client, &source_url, &headers, source_format).await,
         };
         let id = Uuid::new_v4().to_string();
         let ts = now();
@@ -366,18 +367,21 @@ async fn classify_url(
     client: &reqwest::Client,
     source_url: &str,
     headers: &HashMap<String, String>,
+    source_format: Option<&str>,
 ) -> DownloadKind {
-    if source_url.contains(".m3u8") || source_url.contains("mpegurl") {
-        if detect_fmp4_hls(client, source_url, headers)
-            .await
-            .unwrap_or(false)
-        {
+    let try_hls = source_format == Some("hls")
+        || source_url.contains(".m3u8")
+        || source_url.contains("mpegurl");
+    if try_hls {
+        let fmp4 = detect_fmp4_hls(client, source_url, headers).await;
+        if fmp4.unwrap_or(false) {
             return DownloadKind::HlsFmp4;
         }
-        if detect_mpegts_hls(client, source_url, headers)
-            .await
-            .unwrap_or(false)
-        {
+        let ts = detect_mpegts_hls(client, source_url, headers).await;
+        if ts.unwrap_or(false) {
+            return DownloadKind::HlsMpegTs;
+        }
+        if source_format == Some("hls") {
             return DownloadKind::HlsMpegTs;
         }
     }

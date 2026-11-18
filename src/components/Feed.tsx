@@ -25,7 +25,7 @@ export interface FeedPresentation {
   onBack?: () => void; onNext?: () => void; onPrevious?: () => void; onNextEpisode?: () => void; onPreviousEpisode?: () => void;
   queueIndex?: number; total?: number;
   previousPreview?: { title: string; poster?: string }; nextPreview?: { title: string; poster?: string };
-  onCacheEpisode?: () => void | Promise<void>;
+  onCacheEpisode?: () => void | Promise<{ ok: boolean; message: string } | void>;
   onOpenDownloads?: () => void;
   cacheDisabledReason?: string;
   cacheBusy?: boolean;
@@ -245,7 +245,7 @@ export default function Feed({media, position, active=true, preparing=false, err
         {onFavorite && <button onClick={onFavorite} aria-label={favorite?"取消本地收藏":"本地收藏"} aria-pressed={favorite}>{favorite ? <IHeartF size={22}/> : <IHeart size={22}/>}收藏</button>}
         {panels.playback && <button onClick={()=>setPanel("playback")}><ISettings size={22}/>画质与线路</button>}
         {panels.comments && <button onClick={()=>setPanel("comments")}><ICommentF size={22}/>评论</button>}
-        {onCacheEpisode && <button type="button" disabled={cacheBusy || !!cacheDisabledReason} aria-disabled={cacheBusy || !!cacheDisabledReason} title={cacheDisabledReason || "将当前分集缓存到离线"} onClick={()=>{if(cacheBusy||cacheDisabledReason)return;setPanel(null);void onCacheEpisode();}}><IDownload size={22}/>缓存本集{cacheDisabledReason && <small>{cacheDisabledReason}</small>}</button>}
+        {onCacheEpisode && <button type="button" disabled={cacheBusy || !!cacheDisabledReason} aria-disabled={cacheBusy || !!cacheDisabledReason} title={cacheDisabledReason || "将当前分集缓存到离线"} onClick={()=>{if(cacheBusy||cacheDisabledReason)return;setPanel(null);void (async()=>{try{const r=await onCacheEpisode();if(r&&typeof r==="object"&&r.message)toast(r.message);}catch(e){toast(e instanceof Error?e.message:"缓存失败");}})();}}><IDownload size={22}/>缓存本集{cacheDisabledReason && <small>{cacheDisabledReason}</small>}</button>}
         {onOpenDownloads && <button type="button" onClick={()=>{setPanel(null);onOpenDownloads();}}><IDownload size={22}/>缓存管理</button>}
       </div>
       <label>播放速度<select aria-label="播放速度" value={rate} onChange={e=>setRate(Number(e.target.value))}>{[.5,.75,1,1.25,1.5,2].map(v=><option key={v} value={v}>{v}×{v===1?" · 正常":""}</option>)}</select></label>

@@ -162,6 +162,7 @@ async fn progressive_download_pause_resume_and_cancel() {
             format!("{base}/movie.mp4"),
             Default::default(),
             Some(DownloadKind::ProgressiveMp4),
+            None,
         )
         .await
         .unwrap();
@@ -195,10 +196,10 @@ async fn rejects_duplicate_active_task() {
     let manager = DownloadManager::open(dir.path().to_path_buf()).unwrap();
     let url = format!("{base}/movie.mp4");
     manager
-        .enqueue("a".into(), None, url.clone(), Default::default(), Some(DownloadKind::ProgressiveMp4))
+        .enqueue("a".into(), None, url.clone(), Default::default(), Some(DownloadKind::ProgressiveMp4), None)
         .await
         .unwrap();
-    assert!(manager.enqueue("b".into(), None, url, Default::default(), None).await.is_err());
+    assert!(manager.enqueue("b".into(), None, url, Default::default(), None, None).await.is_err());
 }
 
 #[tokio::test]
@@ -214,6 +215,7 @@ async fn fmp4_hls_becomes_playable_mp4() {
             format!("{base}/hls/master.m3u8"),
             Default::default(),
             Some(DownloadKind::HlsFmp4),
+            None,
         )
         .await
         .unwrap();
@@ -246,6 +248,7 @@ async fn mpegts_hls_offline_package() {
             format!("{base}/hls-ts/master.m3u8"),
             Default::default(),
             Some(DownloadKind::HlsMpegTs),
+            None,
         )
         .await
         .unwrap();
@@ -274,7 +277,7 @@ async fn real_public_mpegts_hls_download() {
     let manager = DownloadManager::open(dir.path().to_path_buf()).unwrap();
     let url = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8";
     let task = manager
-        .enqueue("apple-ts".into(), None, url.into(), Default::default(), Some(DownloadKind::HlsMpegTs))
+        .enqueue("apple-ts".into(), None, url.into(), Default::default(), Some(DownloadKind::HlsMpegTs), None)
         .await
         .unwrap();
     for _ in 0..180 {
@@ -297,7 +300,7 @@ async fn real_public_mp4_download() {
     let manager = DownloadManager::open(dir.path().to_path_buf()).unwrap();
     let url = "https://storage.googleapis.com/exoplayer-test-media-1/mp4/android-screens-10s.mp4";
     let task = manager
-        .enqueue("sample".into(), None, url.into(), Default::default(), Some(DownloadKind::ProgressiveMp4))
+        .enqueue("sample".into(), None, url.into(), Default::default(), Some(DownloadKind::ProgressiveMp4), None)
         .await
         .unwrap();
     for _ in 0..60 {

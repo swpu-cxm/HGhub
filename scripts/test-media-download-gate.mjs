@@ -14,4 +14,21 @@ const network = spawnSync(
 );
 if (network.status !== 0) process.exit(network.status ?? 1);
 
-console.log("media_download gate: fixture + real-network integration tests passed.");
+const huangguo = spawnSync(
+  "cargo",
+  [
+    "test",
+    "--manifest-path",
+    "src-tauri/crates/hpp/Cargo.toml",
+    "--test",
+    "huangguo_cache",
+    "--",
+    "--ignored",
+    "--test-threads=1",
+    "--nocapture",
+  ],
+  { stdio: "inherit", env: process.env },
+);
+if (huangguo.status !== 0) process.exit(huangguo.status ?? 1);
+
+console.log("media_download gate: fixture + real-network + 黄果琼明神女录缓存集成测试通过。");

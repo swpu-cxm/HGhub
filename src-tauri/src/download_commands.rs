@@ -15,6 +15,7 @@ struct EnqueueParams {
     source_url: String,
     headers: Option<HashMap<String, String>>,
     kind: Option<DownloadKind>,
+    media_format: Option<String>,
 }
 
 #[tauri::command]
@@ -35,7 +36,8 @@ pub async fn download_manage(
                         p.episode_label,
                         p.source_url,
                         p.headers.unwrap_or_default(),
-                        p.kind
+                        p.kind,
+                        p.media_format.as_deref(),
                     )
                     .await?
             ))

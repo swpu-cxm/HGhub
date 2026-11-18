@@ -59,7 +59,7 @@ export default function DownloadsPage({ onBack }: { onBack: () => void }) {
   };
   return <BrowseFrame title="离线缓存" tools={<button onClick={onBack} aria-label="返回"><IBack size={18}/></button>}>
     <Notice error={error}/>
-    <p className="text-xs text-mut mb-3">支持：直链 MP4、fMP4 HLS（合并为单 MP4）、MPEG-TS HLS（index.m3u8 + .ts 分片，断网可播）。不支持：AES-128/SAMPLE-AES、BYTERANGE、独立音轨 Rendition、DRM。</p>
+    <p className="text-xs text-mut mb-3">支持：直链 MP4、fMP4 HLS（合并为单 MP4）、MPEG-TS HLS（含 AES-128 密钥离线包，断网可播）。不支持：SAMPLE-AES、BYTERANGE、独立音轨 Rendition、DRM。</p>
     {!tasks.length ? <p className="text-mut text-sm">暂无下载任务。在作品详情页可添加缓存。</p> : <ul className="space-y-2">
       {tasks.map(task => {
         const pct = task.bytesTotal ? Math.min(100, Math.round(task.bytesDone / task.bytesTotal * 100)) : null;

@@ -358,13 +358,17 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
     {[...new Set(pagedEpisodes.map(e=>e.season))].map(season=><section key={season??"none"}>{season!==undefined&&<h4>{detail?.seasons?.find(s=>s.number===season)?.label||`第 ${season} 季`}</h4>}<div className="hpp-episodes">{pagedEpisodes.filter(e=>e.season===season).map(ep=><button key={ep.id} title={ep.lockReason||ep.title} className={highlighted===ep.id?"selected":""} aria-label={ep.label||`第 ${ep.index} 集`} aria-pressed={highlighted===ep.id} disabled={busy||ep.locked||!canPlay} onClick={()=>beginEpisode(ep)}><span>{ep.episodeNumber??ep.index}</span>{highlighted===ep.id&&<i aria-hidden="true">▮▮▮</i>}{ep.locked&&<small>不可用</small>}</button>)}</div></section>)}
     {!currentList?.episodes.length && <p className="hg-episode-empty">{detail ? "暂无分集，可尝试其他播放列表" : "正在读取分集…"}</p>}
     {currentList?.next && plugin.methods.includes("media.listEpisodes") && <button className="hg-load-episodes" disabled={busy} onClick={()=>void more()}>加载更多分集</button>}</div>;
-  const cacheEpisode = async () => {
+  const cacheEpisode = async (): Promise<{ ok: boolean; message: string }> => {
     const ep = current.current?.ep;
     const listId = current.current?.playlistId || playlist;
-    if (!detail || !ep) { setError("请先选择分集"); return; }
+    if (!detail || !ep) {
+      const message = "请先选择分集";
+      setError(message);
+      return { ok: false, message };
+    }
     setBusy(true);
     try {
-      const playback = await pluginCommand<{ streams: { url: string; format?: string; headers?: Record<string, string> }[] }>("call", {
+      const playback = await request<{ streams: { url: string; format?: string; headers?: Record<string, string> }[] }>("call", {
         id: plugin.meta.id,
         method: "media.resolvePlayback",
         args: { mediaId, playlistId: listId, episodeId: ep.id, serverId: selection.current.serverId, streamIndex: selection.current.streamIndex, resolverId: selection.current.resolverId, resolverStreamIndex: selection.current.resolverStreamIndex, resolverServers: selection.current.resolverServers },
@@ -379,11 +383,16 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
           episodeLabel: ep.label || `第 ${ep.index} 集`,
           sourceUrl: pick.url,
           headers: pick.headers || {},
+          mediaFormat: pick.format,
         },
       });
+      const message = `「${detail.title}」${ep.label || `第 ${ep.index} 集`} 已加入离线缓存`;
       app.push({ kind: "downloads" });
+      return { ok: true, message };
     } catch (e) {
-      setError(e instanceof Error ? e.message : "无法创建缓存任务");
+      const message = pluginError(e);
+      setError(message);
+      return { ok: false, message };
     } finally { setBusy(false); }
   };
   const playbackPanel=<><Notice error={error}/><div className="hpp-playback-options" aria-label="播放选择">{choices && <>
