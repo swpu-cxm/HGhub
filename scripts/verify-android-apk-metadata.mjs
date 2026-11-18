@@ -36,7 +36,7 @@ function apkContainsMarker(apkPath, marker) {
   const targets = (list.stdout?.split("\n") ?? []).filter(
     n =>
       n &&
-      (/lib\/arm64-v8a\/.*\.so$/i.test(n) ||
+      (/lib\/[^/]+\/.*\.so$/i.test(n) ||
         /classes\.dex$/i.test(n) ||
         /assets\/.*\.(js|css)$/i.test(n)),
   );
@@ -52,7 +52,7 @@ export async function verifyApkMetadata(apkPath, expected) {
     versionCode,
     versionName,
     packageName = "com.hghub.player",
-    markers = ["offlineHlsRead", "app_update_inspect_apk"],
+    markers = ["OFFLINE_IPC_LOADER", "hghub-offline", "OFFLINE_HLS_FORBIDDEN", "app_update_inspect_apk"],
     requireArm64 = true,
   } = expected;
   const meta = badging(apkPath);

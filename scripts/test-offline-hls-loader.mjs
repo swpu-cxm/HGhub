@@ -10,6 +10,7 @@ const loader = readFileSync(join(root, "src/plugins/offlineHlsLoader.ts"), "utf8
 assert.match(loader, /offlineHlsRead/);
 assert.match(loader, /hghub-offline:\/\//);
 assert.match(loader, /OFFLINE_HLS_REMOTE_BLOCKED/);
+assert.match(loader, /OFFLINE_IPC_LOADER/);
 
 const offline = readFileSync(join(root, "src/plugins/offlinePlayback.ts"), "utf8");
 assert.match(offline, /offlineHlsManifestUrl/);
