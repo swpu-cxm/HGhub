@@ -52,7 +52,7 @@ export async function verifyApkMetadata(apkPath, expected) {
     versionCode,
     versionName,
     packageName = "com.hghub.player",
-    markers = ["OFFLINE_IPC_LOADER", "hghub-offline", "OFFLINE_HLS_FORBIDDEN", "app_update_inspect_apk"],
+    markers = ["OFFLINE_HLS_FORBIDDEN", "OFFLINE_HLS_NOT_FOUND", "app_update_inspect_apk"],
     requireArm64 = true,
   } = expected;
   const meta = badging(apkPath);
