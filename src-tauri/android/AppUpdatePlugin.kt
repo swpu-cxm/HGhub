@@ -10,7 +10,7 @@ import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
-import app.tauri.plugin.PermissionState
+import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
 
@@ -19,21 +19,22 @@ import java.io.File
 class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun getAbi(invoke: Invoke) {
-    invoke.resolve(mapOf("abi" to currentAbi()))
+    val ret = JSObject()
+    ret.put("abi", currentAbi())
+    invoke.resolve(ret)
   }
 
   @Command
   fun canRequestPackageInstalls(invoke: Invoke) {
-  invoke.resolve(
-      mapOf(
-        "allowed" to
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            activity.packageManager.canRequestPackageInstalls()
-          } else {
-            true
-          },
-      ),
-    )
+    val allowed =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        activity.packageManager.canRequestPackageInstalls()
+      } else {
+        true
+      }
+    val ret = JSObject()
+    ret.put("allowed", allowed)
+    invoke.resolve(ret)
   }
 
   @Command
