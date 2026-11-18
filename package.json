@@ -1,7 +1,8 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.6.7-swpu-install-test",
+  "androidVersionCode": 17,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
@@ -20,7 +21,17 @@
     "android:init": "tauri android init",
     "android:icons": "node scripts/sync-android-icons.mjs",
     "android:dev": "tauri android dev",
-    "android:build": "tauri android build"
+    "android:build": "tauri android build",
+    "test:app-updates": "node scripts/test-app-updates.mjs",
+    "test:media-download": "node scripts/test-media-download-gate.mjs",
+    "test:huangguo-cache": "node scripts/test-huangguo-cache-integration.mjs",
+    "test:offline-playback": "node scripts/test-offline-playback.mjs",
+    "test:offline-hls-loader": "node scripts/test-offline-hls-loader.mjs",
+    "test:app-update-apk": "node scripts/test-app-update-apk.mjs",
+    "test:app-update-android-deser": "node scripts/test-app-update-android-deser.mjs",
+    "test:orientation-android-deser": "node scripts/test-orientation-android-deser.mjs",
+    "test:library-cache-grouping": "node scripts/test-library-cache-grouping.mjs",
+    "test:cache-request-chain": "node scripts/test-cache-request-chain.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

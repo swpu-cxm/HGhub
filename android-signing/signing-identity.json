@@ -1,0 +1,11 @@
+{
+  "alias": "hghub",
+  "sha256Fingerprint": "85:4C:C8:68:DF:ED:17:FA:1D:90:2B:60:C3:C7:B6:AC:D2:CE:DA:6D:23:85:39:E6:63:9C:51:44:41:22:55:AD",
+  "certificateFile": "hghub-release-cert.pem",
+  "encryptedKeystoreFile": "hghub-release.keystore.enc",
+  "encryptedKeystore": {
+    "algorithm": "openssl enc -aes-256-cbc -pbkdf2 -salt",
+    "notes": "解密口令不存放在本仓库；由仓库维护者安全保存（见 RESTORE.md）。"
+  },
+  "purpose": "swpu-cxm Android 安装测试与后续 OTA 同一签名身份；CI 签名后必须与此指纹一致。"
+}

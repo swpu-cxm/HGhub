@@ -27,6 +27,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["formatting"] }
 hghub-hpp = { path = "crates/hpp" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "stream"] }
+sha2 = "0.10"
+base64 = "0.22"
 
 [patch.crates-io]
 rquickjs-sys = { path = "vendor/rquickjs-sys" }

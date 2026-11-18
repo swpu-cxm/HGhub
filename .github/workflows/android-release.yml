@@ -1,0 +1,188 @@
+name: Android Release (swpu-cxm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer without v prefix (e.g. 0.0.3)"
+        required: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+
+jobs:
+  gate:
+    name: Lint and tests (release gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/test-app-updates.mjs
+      - run: node scripts/test-media-download-gate.mjs
+
+  android:
+    name: Android signed APK
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 版本号对齐
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          node -e "const fs=require('fs');for(const p of ['src-tauri/tauri.conf.json','package.json']){const j=JSON.parse(fs.readFileSync(p));j.version=process.argv[1];fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')}" "$V"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 准备 Android SDK / NDK
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SDKM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "NDK_HOME=$SDK/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: android-private
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri android init --ci
+      - run: node scripts/sync-android-network.mjs
+      - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
+
+      - name: 上传未签名 APK（可供离线签名）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unsigned
+          if-no-files-found: ignore
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*-release*.apk
+
+      - name: 确认签名 Secrets 已配置（不输出值）
+        id: android_signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          miss=0
+          for name in KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then echo "::warning::$name 未在仓库 Secrets 中配置"; miss=1; fi
+          done
+          if [ "$miss" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "签名 Secrets 四项均已配置（GitHub 不允许回读值，此处仅检测非空）。"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Android APK 已编译，但未配置签名 Secrets，无法发布正式签名包。"
+            exit 1
+          fi
+
+      - name: 签名并校验 APK
+        if: steps.android_signing.outputs.configured == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          KS="$RUNNER_TEMP/release.keystore"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$KS"
+          trap 'rm -f "$KS"' EXIT
+          BT="$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/$BT/apksigner"
+          mkdir -p artifacts checksums
+          found=0
+          for f in $(find src-tauri/gen/android/app/build/outputs/apk -name '*-release*.apk'); do
+            abi="$(basename "$(dirname "$(dirname "$f")")")"
+            out="artifacts/HGhub_${VERSION}_${abi}.apk"
+            "$APKSIGNER" sign --ks "$KS" --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass "pass:$STORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" \
+              --v4-signing-enabled false --out "$out" "$f"
+            "$APKSIGNER" verify --print-certs "$out" | head -5
+            sha256sum "$out" | tee "checksums/HGhub_${VERSION}_${abi}.apk.sha256"
+            node scripts/verify-android-apk-cert.mjs "$out"
+            found=$((found+1))
+          done
+          rm -f "$KS"
+          [ "$found" -gt 0 ] || { echo "::error::未找到 release APK"; exit 1; }
+          ls -lh artifacts checksums
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            artifacts/*
+            checksums/*
+
+  release:
+    name: Publish GitHub Release
+    needs: android
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: android
+          merge-multiple: true
+      - run: ls -lh dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', inputs.version) }}
+          name: HGhub Android Release
+          body: |
+            ## Android 私有构建（swpu-cxm/HGhub）
+
+            - 仅包含 Android 签名 APK（按 ABI 分包）
+            - 校验文件见 `checksums/*.sha256`
+            - 应用内更新源：`swpu-cxm/HGhub` Releases
+          files: dist/**/*
+          generate_release_notes: true

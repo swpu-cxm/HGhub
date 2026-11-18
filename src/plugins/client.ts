@@ -10,6 +10,10 @@ export interface InstalledPlugin {
 export interface PreparedMedia {
   requestedAt?: number;
   sessionId: string; url: string; format: "hls" | "progressive"; providerId: string;
+  /** 本地离线文件：走原生 HLS/文件播放，不经插件会话与 media.activity。 */
+  localFile?: boolean;
+  /** HLS TS 离线包：经 IPC loader 读取，不用 WebView XHR 访问 asset。 */
+  offlineDownloadId?: string;
   playback: Omit<PlaybackInfo, "streams">;
   choices: { source: PlaybackChoices; resolver?: PlaybackChoices; resolverRoute?: ResolverRoute };
 }

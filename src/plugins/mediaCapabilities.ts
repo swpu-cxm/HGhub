@@ -14,6 +14,12 @@ export function hlsPlaybackPath(video: HTMLVideoElement): "mse" | "native" | "un
     ? "native" : "unsupported";
 }
 
+/** Android WebView does not decode local AES-128 TS via video src; prefer Hls.js MSE. */
+export function offlineHlsPlaybackPath(video: HTMLVideoElement): "mse" | "native" | "unsupported" {
+  if (Hls.isSupported()) return "mse";
+  return hlsPlaybackPath(video);
+}
+
 export function probeMediaCapabilities(): MediaCapabilities {
   const video = document.createElement("video");
   const mse = Hls.getMediaSource();

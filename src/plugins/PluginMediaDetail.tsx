@@ -17,6 +17,11 @@ import SourceSwitcher from "./SourceSwitcher";
 import type { SourceStart } from "./sourceMatching";
 import ResolverChooser from "./ResolverChooser";
 import { useStore } from "../store";
+import { invoke } from "@tauri-apps/api/core";
+import { fetchDownloadCatalog } from "./cacheApi";
+import { enqueueEpisodeBatch, enqueueEpisodeCache, type BatchEnqueueInput } from "./cacheEnqueue";
+import CacheBatchPanel from "./CacheBatchPanel";
+import type { DownloadTask } from "./libraryCache";
 import { registerBackHandler } from "../back";
 import { setMobileOrientation } from "../orientation";
 import { isMobile } from "../environment";
@@ -44,6 +49,7 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
   const [detailRound, setDetailRound] = useState(0);
   const [needsDetail, setNeedsDetail] = useState(!entryEpisodeId || !homePreview);
   const [episodePage, setEpisodePage] = useState(0);
+  const [cacheTasks, setCacheTasks] = useState<DownloadTask[]>([]);
   const playbackRequested = homePreview || fullPlayback;
   const leavePlayback = () => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
@@ -357,20 +363,81 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
     {[...new Set(pagedEpisodes.map(e=>e.season))].map(season=><section key={season??"none"}>{season!==undefined&&<h4>{detail?.seasons?.find(s=>s.number===season)?.label||`第 ${season} 季`}</h4>}<div className="hpp-episodes">{pagedEpisodes.filter(e=>e.season===season).map(ep=><button key={ep.id} title={ep.lockReason||ep.title} className={highlighted===ep.id?"selected":""} aria-label={ep.label||`第 ${ep.index} 集`} aria-pressed={highlighted===ep.id} disabled={busy||ep.locked||!canPlay} onClick={()=>beginEpisode(ep)}><span>{ep.episodeNumber??ep.index}</span>{highlighted===ep.id&&<i aria-hidden="true">▮▮▮</i>}{ep.locked&&<small>不可用</small>}</button>)}</div></section>)}
     {!currentList?.episodes.length && <p className="hg-episode-empty">{detail ? "暂无分集，可尝试其他播放列表" : "正在读取分集…"}</p>}
     {currentList?.next && plugin.methods.includes("media.listEpisodes") && <button className="hg-load-episodes" disabled={busy} onClick={()=>void more()}>加载更多分集</button>}</div>;
+  useEffect(() => {
+    if (!detailOpen && !fullPlayback) return;
+    void fetchDownloadCatalog()
+      .then(c => setCacheTasks(c.tasks.filter(t => t.pluginId === plugin.meta.id && t.mediaId === mediaId)))
+      .catch(() => {});
+  }, [detailOpen, fullPlayback, plugin.meta.id, mediaId, busy]);
+
+  const cacheEpisode = async (): Promise<{ ok: boolean; message: string }> => {
+    const ep = current.current?.ep;
+    const listId = current.current?.playlistId || playlist;
+    if (!detail || !ep) {
+      const message = "请先选择分集";
+      setError(message);
+      return { ok: false, message };
+    }
+    setBusy(true);
+    try {
+      await enqueueEpisodeCache({
+        pluginId: plugin.meta.id,
+        mediaId,
+        detail,
+        pluginName: plugin.meta.name,
+        ep,
+        playlistId: listId || detail.playlists[0]?.id,
+        selection: { ...selection.current },
+        poster,
+      });
+      const message = `「${detail.title}」${ep.label || `第 ${ep.index} 集`} 已加入离线缓存`;
+      app.openLibraryCacheWork(plugin.meta.id, mediaId);
+      return { ok: true, message };
+    } catch (e) {
+      const message = pluginError(e);
+      setError(message);
+      return { ok: false, message };
+    } finally { setBusy(false); }
+  };
+
+  const batchEnqueueInput = (): BatchEnqueueInput | null => {
+    if (!detail) return null;
+    return {
+      pluginId: plugin.meta.id,
+      mediaId,
+      detail,
+      pluginName: plugin.meta.name,
+      playlistId: playlist || current.current?.playlistId || detail.playlists[0]?.id,
+      selection: { ...selection.current },
+      poster,
+    };
+  };
   const playbackPanel=<><Notice error={error}/><div className="hpp-playback-options" aria-label="播放选择">{choices && <>
     <PlaybackOptions stage="源" choices={choices.source} disabled={busy} onServer={serverId=>selectPlayback({serverId:serverId||undefined,streamIndex:0,resolverStreamIndex:0})} onStream={streamIndex=>selectPlayback({streamIndex,resolverStreamIndex:0})}/>
     {choices.resolver && <PlaybackOptions stage="解析器" choices={choices.resolver} disabled={busy} onServer={serverId=>selectPlayback({resolverServers:{...selection.current.resolverServers,[choices.resolver!.pluginId]:serverId},resolverStreamIndex:0})} onStream={resolverStreamIndex=>selectPlayback({resolverStreamIndex})}/>}</>}
     <button disabled={busy||!active} onClick={refresh}>刷新播放</button><button disabled={busy||!active} onClick={()=>selectPlayback({serverId:undefined,resolverId:undefined,streamIndex:0,resolverStreamIndex:0,resolverServers:{}})}>使用默认播放选择</button>
+    <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集到离线</button>
+    <button type="button" onClick={()=>app.openLibraryCache()}>查看缓存</button>
     <button disabled={busy||!detail} onClick={()=>setSwitching(true)}>换源</button>
     {choices?.resolverRoute && <ResolverChooser key={choices.resolverRoute.host} route={choices.resolverRoute} busy={busy||!active} select={(resolverId,resolverHost)=>{const c=current.current;return c?play(c.ep,"switch",c.playlistId,{...selection.current,resolverId,resolverHost,resolverStreamIndex:0}):Promise.resolve(undefined);}}/>}</div></>;
   const detailPanel=detail?<><div className="legacy-detail-summary">{poster&&<img src={poster} alt=""/>}<div><h2>{detail.title}</h2><p>{plugin.meta.name}</p>{detail.score!==undefined&&<strong>{detail.score.toFixed(1)} 分</strong>}<p>{detail.episodeCount||currentList?.episodes.length||0} 集</p></div></div><h3>简介</h3><p className="hpp-description">{detail.description||"暂无简介"}</p>
     <button onClick={()=>void host.put(plugin.meta.id,detail,{tracking:!entry?.tracking}).catch(e=>setError(pluginError(e)))}>{entry?.tracking?"取消追更":"追更"}</button>
     {resume&&<button disabled={busy} onClick={()=>{const list=detail.playlists.find(p=>p.id===resume.playlistId),ep=list?.episodes.find(e=>e.id===resume.episodeId);if(list&&ep){setPlaylist(list.id);void play(ep,"play",list.id);}else setError("上次分集暂未加载，请加载对应播放列表后选集。");}}>继续观看 · {Math.floor(resume.positionSec)} 秒</button>}
-    {active&&<MediaInteractions plugin={plugin} detail={detail}/>}<button onClick={manage}>管理此插件</button></>:<p>{error||"正在读取作品…"}</p>;
+    {active&&<MediaInteractions plugin={plugin} detail={detail}/>}
+    <div className="hpp-cache-actions">
+      <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集</button>
+      <button type="button" onClick={()=>app.openLibraryCacheWork(plugin.meta.id, mediaId)}>本作品缓存</button>
+    </div>
+    <button onClick={manage}>管理此插件</button></>:<p>{error||"正在读取作品…"}</p>;
   const favoriteAction = () => { const item = detail || entryItem; if (item) void host.put(plugin.meta.id,item,{favorite:!entry?.favorite}).catch(e=>setError(pluginError(e))); };
+  const cacheDisabledReason = busy ? "正在处理播放或解析" : !current.current?.ep ? "请先选择并播放分集" : !canPlay ? "当前分集不可播放" : undefined;
   return <div className={`legacy-media-page ${fullPlayback ? "hg-watching" : homePreview ? "hg-discovering" : "hg-detail-entry"}`}>
     {playbackRequested &&
     <PluginPlayer {...presentation} playIntent={playIntent} mode={fullPlayback ? "full" : "preview"} onOpenDetail={openDetail} media={canPlay?media:null} preparing={busy && (transitioning.current || !media)} active={active && !detailOpen && !transitioning.current} position={position.current} error={error} onRetry={refresh}
+      onCacheEpisode={fullPlayback ? () => cacheEpisode() : undefined}
+      onOpenDownloads={fullPlayback ? () => app.openLibraryCache() : undefined}
+      cacheDisabledReason={fullPlayback ? cacheDisabledReason : "预览模式不支持缓存"}
+      cacheBusy={busy}
       previousPreview={fullPlayback ? previousEpisode ? {title:previousEpisode.label || '上一集',poster} : undefined : presentation.previousPreview}
       nextPreview={fullPlayback ? nextEpisode ? {title:nextEpisode.label || '下一集',poster} : undefined : presentation.nextPreview}
       onPanelChange={panel=>{if(panel==='detail'||panel==='episodes')setNeedsDetail(true);}}
@@ -394,6 +461,19 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
       playLabel={busy ? "正在准备…" : episode ? `继续${episode.label || `第 ${episode.index} 集`}` : resume ? "继续观看" : "立即播放"}
       error={error} onRetry={()=>{setError("");setDetailRound(v=>v+1);}}>
       {episodesPanel}
+      {detail && currentList?.episodes?.length ? (
+        <CacheBatchPanel
+          episodes={currentList.episodes}
+          tasks={cacheTasks}
+          busy={busy}
+          onEnqueueSelected={async eps => {
+            const input = batchEnqueueInput();
+            if (!input) throw new Error("缺少作品信息");
+            app.openLibraryCacheWork(plugin.meta.id, mediaId);
+            return enqueueEpisodeBatch(eps, input);
+          }}
+        />
+      ) : null}
       {detail && <div className="hg-detail-secondary"><button aria-pressed={!!entry?.tracking} onClick={()=>void host.put(plugin.meta.id,detail,{tracking:!entry?.tracking}).catch(e=>setError(pluginError(e)))}>{entry?.tracking ? "已追更" : "追更这部作品"}</button><details><summary>更多作品信息</summary><MediaInteractions plugin={plugin} detail={detail}/><button onClick={manage}>管理此片源</button></details></div>}
     </MediaDetailSheet>}
     {switching&&detail&&active&&<SourceSwitcher plugin={plugin} detail={detail} previousEpisode={current.current?.ep} getPosition={()=>position.current} beforeSwitch={save} onConfirm={onSwitch} onClose={()=>setSwitching(false)}/>}

@@ -6,10 +6,18 @@ import { usePluginRequests } from "./usePluginRequests";
 import { useAssetUrls } from "./MediaCards";
 import type { UserProfile } from "./protocol";
 import CloudLibrary from "./CloudLibrary";
-import { ICpu, IChevR, ISettings, IStar, IHist, IUser } from "../icons";
+import { ICpu, IChevR, ISettings, IStar, IHist, IUser, IDownload } from "../icons";
+import LibraryCachePanel from "./LibraryCachePanel";
+import { useStore, type LibraryPanel } from "../store";
 
 export default function LibraryPage({ open, manage, settings }: { open: OpenMedia; manage: (id?: string) => void; settings: () => void }) {
-  const host = useHost(), request = usePluginRequests(), [kind, setKind] = useState<"favorite" | "cloud" | "history">("favorite");
+  const app = useStore();
+  const host = useHost(), request = usePluginRequests();
+  const kind = app.libraryPanel;
+  const setKind = (panel: LibraryPanel) => {
+    app.setLibraryPanel(panel);
+    try { localStorage.setItem("hpp.libraryPanel", panel); } catch { /* ignore */ }
+  };
   const [trackingOnly, setTrackingOnly] = useState(false);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
   const visible = host.library.filter(e => kind === "history" ? !!e.lastProgress : trackingOnly ? e.tracking : e.favorite)
@@ -37,9 +45,9 @@ export default function LibraryPage({ open, manage, settings }: { open: OpenMedi
   const accounts = host.sources.filter(p => p.methods.includes("auth.getProfile") || p.methods.includes("library.listMedia"));
   return <div className="hpp-page hpp-library-page"><header className="shrink-0 px-4 pb-2 flex items-center" style={{paddingTop:"calc(var(--sat,0px) + 14px)"}}><h1 className="text-[24px] font-bold text-on leading-none">我的片库</h1><button aria-label="设置" onClick={settings} className="ml-auto w-9 h-9 rounded-full bg-s3 flex items-center justify-center"><ISettings size={17}/></button></header><div className="hpp-scroll"><div className="hpp-content">
     <button className="hpp-library-plugins" onClick={() => manage()}><span className="hpp-plugin-icon"><ICpu size={24}/></span><span><strong>插件中心</strong><small>管理片源、导入插件与账号登录</small></span><IChevR size={18}/></button>
-    <nav className="hpp-library-tabs" aria-label="片库分栏">{([["favorite","收藏",IStar],["cloud","来自片源",IUser],["history","历史",IHist]] as const).map(([id,label,Icon])=><button key={id} aria-pressed={kind===id} onClick={()=>setKind(id)}><Icon size={18}/>{label}</button>)}</nav>
+    <nav className="hpp-library-tabs" aria-label="片库分栏">{([["favorite","收藏",IStar],["cloud","来自片源",IUser],["history","历史",IHist],["cache","缓存",IDownload]] as const).map(([id,label,Icon])=><button key={id} aria-pressed={kind===id} onClick={()=>setKind(id)}><Icon size={18}/>{label}</button>)}</nav>
     <Notice error={error || host.error}/>{notice && <p role="status">{notice}</p>}
-    {kind === "cloud" ? <><p className="hpp-library-caption">登录各片源，查看它们的收藏与观看记录。</p>{accounts.map(p=><Account key={p.meta.id+p.revision} plugin={p} open={open} manage={()=>manage(p.meta.id)}/>)}{!accounts.length&&<div className="hpp-empty"><IUser size={36}/><h2>还没有可用的片源账号</h2><p>添加支持账号或云端片库的数据源后，即可在这里查看。</p><button onClick={()=>manage()}>前往插件中心</button></div>}</> : <>
+    {kind === "cache" ? <LibraryCachePanel/> : kind === "cloud" ? <><p className="hpp-library-caption">登录各片源，查看它们的收藏与观看记录。</p>{accounts.map(p=><Account key={p.meta.id+p.revision} plugin={p} open={open} manage={()=>manage(p.meta.id)}/>)}{!accounts.length&&<div className="hpp-empty"><IUser size={36}/><h2>还没有可用的片源账号</h2><p>添加支持账号或云端片库的数据源后，即可在这里查看。</p><button onClick={()=>manage()}>前往插件中心</button></div>}</> : <>
       <div className="hpp-library-toolbar"><span>{visible.length} 部作品 · 仅保存在本机</span>{kind==="favorite"?<><button aria-pressed={trackingOnly} onClick={()=>setTrackingOnly(v=>!v)}>只看追更</button>{trackingOnly&&<button disabled={busy} onClick={()=>void checkUpdates()}>检查追更</button>}</>:<button disabled={!visible.length} onClick={()=>{if(window.confirm("清空本机观看历史？收藏不会被删除。"))void pluginCommand("library.history.clear").then(host.refreshLibrary).catch(e=>setError(pluginError(e)));}}>清空观看历史</button>}</div>
       <section className="hpp-local-library">{visible.map(entry=><LibraryCard key={libraryKey(entry.pluginId,entry.mediaId)} entry={entry} open={open} history={kind==="history"} fail={setError}/>)}</section>
       {!visible.length&&<div className="hpp-empty">{kind==="history"?<IHist size={38}/>:<IStar size={38}/>}<h2>{kind==="history"?"你的下一段故事，从这里继续":trackingOnly?"还没有追更作品":"把喜欢的作品，留在这里"}</h2><p>{kind==="history"?"播放过的作品与观看进度会自动保存。":"在播放器或作品详情中收藏，无需登录。"}</p></div>}
