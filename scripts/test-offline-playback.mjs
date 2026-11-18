@@ -19,6 +19,7 @@ assert.match(cache, /kind:\s*"offlinePlay"/);
 const video = readFileSync(join(root, "src/components/VideoSurface.tsx"), "utf8");
 assert.match(video, /localFile/);
 assert.match(video, /offlineHlsPlaybackPath/);
+assert.match(video, /createOfflineHlsLoader/);
 assert.doesNotMatch(video, /localFile\s*\?\s*"native"/);
 
 const lib = readFileSync(join(root, "src/plugins/LibraryPage.tsx"), "utf8");

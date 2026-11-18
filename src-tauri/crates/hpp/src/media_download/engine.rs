@@ -4,6 +4,7 @@ use super::{
     progress::{DownloadKind, DownloadState, DownloadTask},
     store::DownloadStore,
 };
+use base64::Engine;
 use crate::{store::now, PluginError, Result};
 use reqwest::Client;
 use std::{
@@ -172,6 +173,57 @@ impl DownloadManager {
         let pkg = self.inner.root.join(format!("offline/pkg_{id}"));
         let _ = std::fs::remove_dir_all(pkg);
         Ok(())
+    }
+
+    pub fn offline_hls_package_dir(&self, id: &str) -> Result<std::path::PathBuf> {
+        let tasks = self.inner.tasks.lock().unwrap();
+        let task = tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| PluginError::invalid("找不到下载任务"))?;
+        if task.kind != DownloadKind::HlsMpegTs {
+            return Err(PluginError::invalid("不是 HLS TS 离线任务"));
+        }
+        if task.state != DownloadState::Completed {
+            return Err(PluginError::invalid("任务尚未完成"));
+        }
+        let rel = task
+            .output_rel
+            .as_ref()
+            .ok_or_else(|| PluginError::internal("缺少输出路径"))?;
+        let path = self.inner.root.join(rel);
+        if !path.exists() {
+            return Err(PluginError::invalid("离线文件已不存在"));
+        }
+        Ok(if path.is_file() {
+            path.parent()
+                .ok_or_else(|| PluginError::invalid("HLS 路径无效"))?
+                .to_path_buf()
+        } else {
+            path
+        })
+    }
+
+    pub fn offline_hls_read(&self, id: &str, resource: &str) -> Result<serde_json::Value> {
+        let pkg = self.offline_hls_package_dir(id)?;
+        let name = hls_mpegts::validate_offline_resource_name(resource)?;
+        let bytes = hls_mpegts::read_offline_package_file(&pkg, &name)?;
+        let mime = if name.ends_with(".m3u8") {
+            "application/vnd.apple.mpegurl"
+        } else if name.ends_with(".ts") {
+            "video/mp2t"
+        } else if name.ends_with(".key") {
+            "application/octet-stream"
+        } else {
+            "application/octet-stream"
+        };
+        Ok(serde_json::json!({
+            "name": name,
+            "bytes": bytes.len(),
+            "mime": mime,
+            "dataB64": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "loader": "ipc",
+        }))
     }
 
     pub fn prepare_playback(&self, id: &str) -> Result<serde_json::Value> {

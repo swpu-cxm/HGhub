@@ -286,6 +286,13 @@ async fn mpegts_hls_offline_package() {
     let index = dir.path().join(done.output_rel.as_ref().unwrap());
     assert!(index.is_file());
     assert!(std::fs::read_to_string(&index).unwrap().contains("seg00000.ts"));
+    let manifest = manager.offline_hls_read(&task.id, "index.m3u8").unwrap();
+    assert!(manifest["loader"].as_str() == Some("ipc"));
+    assert!(manifest["bytes"].as_u64().unwrap() > 20);
+    assert!(!manifest["dataB64"].as_str().unwrap().is_empty());
+    let seg = manager.offline_hls_read(&task.id, "seg00000.ts").unwrap();
+    assert!(seg["bytes"].as_u64().unwrap() > 100);
+    assert!(manager.offline_hls_read(&task.id, "../../../etc/passwd").is_err());
 }
 
 #[tokio::test]

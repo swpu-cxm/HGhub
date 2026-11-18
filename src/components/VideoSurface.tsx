@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import Hls from "hls.js";
 import workerPath from 'hls.js/dist/hls.worker.js?url';
 import { hlsPlaybackPath, offlineHlsPlaybackPath } from '../plugins/mediaCapabilities';
+import { createOfflineHlsLoader } from '../plugins/offlineHlsLoader';
 import { playbackTiming } from '../plugins/playbackTiming';
 import { pluginCommand, type PreparedMedia } from "../plugins/client";
 
@@ -63,9 +64,21 @@ export default forwardRef<VideoHandle, Props>(function VideoSurface(props, forwa
     const visibility=()=>{if(document.hidden){resume=!v.paused;v.pause();hls.current?.stopLoad();}else if(resume){resume=false;if(latest.current.active){hls.current?.startLoad(v.currentTime);play();}}};
     v.muted=p.muted;v.volume=p.volume;v.playbackRate=p.rate;
     v.addEventListener("loadedmetadata",metadata);v.addEventListener("error",onVideoError);v.addEventListener("playing",playing);v.addEventListener("pause",paused);document.addEventListener("visibilitychange",visibility);
+    const ipcOffline=p.media.format==="hls"&&!!p.media.offlineDownloadId;
     const hlsPath=p.media.format==="hls"&&(p.media.localFile?offlineHlsPlaybackPath(v):hlsPlaybackPath(v));
     if(hlsPath==="mse"){
-      const engine=new Hls({enableWorker:true,workerPath,autoStartLoad:p.active&&!document.hidden,startPosition:Math.max(0,p.position),backBufferLength:30,interstitialsController:undefined,contentSteeringController:undefined,enableInterstitialPlayback:false});
+      const Loader=ipcOffline?createOfflineHlsLoader(p.media.offlineDownloadId!):undefined;
+      const engine=new Hls({
+        enableWorker:ipcOffline?false:true,
+        workerPath,
+        ...(Loader?{loader:Loader,fLoader:Loader,pLoader:Loader}:{}),
+        autoStartLoad:p.active&&!document.hidden,
+        startPosition:Math.max(0,p.position),
+        backBufferLength:30,
+        interstitialsController:undefined,
+        contentSteeringController:undefined,
+        enableInterstitialPlayback:false,
+      });
       hls.current=engine;engine.loadSource(p.media.url);engine.attachMedia(v);
       engine.on(Hls.Events.ERROR,(_,data)=>{
         if(data.fatal)failPlayback(`${data.type}/${data.details}${data.response?.code?` HTTP ${data.response.code}`:""}${data.error?.message?`: ${data.error.message}`:""}`);

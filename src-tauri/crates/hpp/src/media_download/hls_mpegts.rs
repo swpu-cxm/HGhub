@@ -28,7 +28,7 @@ struct MediaSegment {
     uri: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Aes128Key {
     uri: String,
     iv: String,
@@ -276,6 +276,40 @@ fn atomic_write_json(path: &PathBuf, state: &TsProgress) -> Result<()> {
     Ok(())
 }
 
+pub fn validate_offline_resource_name(resource: &str) -> Result<String> {
+    let trimmed = resource.trim();
+    if trimmed.is_empty() {
+        return Err(PluginError::invalid("资源名为空"));
+    }
+    if trimmed.contains("..") || trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains(':') {
+        return Err(PluginError::new("OFFLINE_HLS_FORBIDDEN", "不允许路径分隔或远程 URI"));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+    {
+        return Err(PluginError::new("OFFLINE_HLS_FORBIDDEN", "资源名含非法字符"));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// 只读已完成离线包目录内的单文件（清单/密钥/分片），禁止路径穿越。
+pub fn read_offline_package_file(package_dir: &Path, resource: &str) -> Result<Vec<u8>> {
+    let name = validate_offline_resource_name(resource)?;
+    let pkg = std::fs::canonicalize(package_dir)
+        .map_err(|_| PluginError::invalid("离线包目录不存在"))?;
+    let candidate = package_dir.join(&name);
+    let file = std::fs::canonicalize(&candidate)
+        .map_err(|_| PluginError::new("OFFLINE_HLS_NOT_FOUND", format!("缺少文件 {name}")))?;
+    if !file.starts_with(&pkg) {
+        return Err(PluginError::new(
+            "OFFLINE_HLS_FORBIDDEN",
+            "资源路径越出离线包目录",
+        ));
+    }
+    std::fs::read(&file).map_err(|_| PluginError::new("OFFLINE_HLS_READ", format!("无法读取 {name}")))
+}
+
 pub(super) fn remove_package(root: &Path, rel: &str) -> Result<()> {
     let path = root.join(rel);
     if path.is_dir() {
@@ -318,5 +352,16 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.message.contains("SAMPLE-AES"));
+    }
+
+    #[test]
+    fn offline_resource_name_rejects_traversal() {
+        assert!(validate_offline_resource_name("../aes128.key").is_err());
+        assert!(validate_offline_resource_name("seg/000.ts").is_err());
+        assert!(validate_offline_resource_name("https://evil/x").is_err());
+        assert_eq!(
+            validate_offline_resource_name("index.m3u8").unwrap(),
+            "index.m3u8"
+        );
     }
 }

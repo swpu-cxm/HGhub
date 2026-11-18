@@ -112,6 +112,15 @@ pub async fn download_manage(
                 .ok_or_else(|| PluginError::invalid("缺少 id"))?;
             Ok(manager.prepare_playback(id)?)
         }
+        "offlineHlsRead" => {
+            let id = params["id"]
+                .as_str()
+                .ok_or_else(|| PluginError::invalid("缺少 id"))?;
+            let resource = params["resource"]
+                .as_str()
+                .ok_or_else(|| PluginError::invalid("缺少 resource"))?;
+            Ok(manager.offline_hls_read(id, resource)?)
+        }
         "attachCover" => {
             let id = params["id"]
                 .as_str()

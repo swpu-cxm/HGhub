@@ -98,7 +98,7 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
               onBuffered={() => {}}
               onError={detail => setError(
                 kind === "hlsMpegTs"
-                  ? `离线 HLS 播放失败${detail ? ` [${detail}]` : ""}。引擎: Hls.js/MSE · 清单/分片/aes128.key 已按本地包加载。`
+                  ? `离线 HLS 播放失败${detail ? ` [${detail}]` : ""}。引擎: Hls.js/MSE · IPC 本地加载（非 asset XHR）。`
                   : `离线视频无法播放${detail ? ` [${detail}]` : ""}`,
               )}
             />

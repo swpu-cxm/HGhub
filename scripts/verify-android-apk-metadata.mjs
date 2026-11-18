@@ -52,7 +52,7 @@ export async function verifyApkMetadata(apkPath, expected) {
     versionCode,
     versionName,
     packageName = "com.hghub.player",
-    markers = ["app_update_inspect_apk", "getBuildInfo"],
+    markers = ["offlineHlsRead", "app_update_inspect_apk"],
     requireArm64 = true,
   } = expected;
   const meta = badging(apkPath);
