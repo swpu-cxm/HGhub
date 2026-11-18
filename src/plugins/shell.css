@@ -221,6 +221,28 @@
 .hpp-cache-episode-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .hpp-cache-episode-actions button{font-size:12px}
 .hpp-cache-refresh{margin-top:16px;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--p-primary)}
+.hpp-cache-work-cards .hpp-cache-group-head{padding:14px}
+.hpp-cache-cover-lg{width:64px;height:86px}
+.hpp-cache-detail-cover img,.hpp-cache-detail-cover span{width:100%;height:100%;object-fit:cover;display:grid;place-items:center}
+.hpp-cache-work-stats{display:block;font-size:12px;color:var(--p-mut);margin-top:6px}
+.hpp-cache-status-grid .hpp-cache-ep-btn small{display:block;font-size:9px;font-weight:500;margin-top:4px;line-height:1.2}
+.hpp-cache-ep-btn.state-completed{background:color-mix(in srgb,var(--p-primary) 18%,var(--p-s3))}
+.hpp-cache-ep-btn.state-running{background:color-mix(in srgb,#3b82f6 20%,var(--p-s3))}
+.hpp-cache-ep-btn.state-queued,.hpp-cache-ep-btn.state-paused{opacity:.85}
+.hpp-cache-ep-btn.state-failed{outline:1px solid color-mix(in srgb,#ef4444 50%,transparent)}
+.hpp-cache-ep-speed{display:block;font-size:8px;font-style:normal;color:var(--p-mut)}
+.hpp-cache-episode-list{margin-top:14px}
+.hpp-cache-batch{margin-top:18px;padding-top:14px;border-top:1px solid var(--surface-border)}
+.hpp-cache-batch-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.hpp-cache-batch-head h3{font-size:15px;margin:0}
+.hpp-cache-batch-tools{display:flex;gap:8px;font-size:12px}
+.hpp-cache-batch-grid{margin-bottom:10px}
+.hpp-cache-batch-ep.is-picked{outline:2px solid var(--p-primary)}
+.hpp-cache-batch-note{font-size:11px;color:var(--p-mut);margin:8px 0}
+.hpp-cache-batch-start{width:100%;padding:12px;border-radius:10px;background:var(--p-primary);color:#fff;font-weight:600}
+.hpp-cache-batch-status{font-size:12px;margin-top:8px;color:var(--p-primary)}
+.hpp-cache-online-btn{width:100%;padding:12px;border-radius:10px;background:var(--p-s3)}
+.hpp-cache-work-footer{padding:12px 16px 20px}
 @media(min-width:801px){.hpp-library-plugins{max-width:480px}.hpp-immersive-home .hpp-player-controls{padding:36px 26px 19px}}
 @media(max-width:800px){
   .win-sidebar{width:176px}

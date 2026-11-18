@@ -11,6 +11,7 @@ import {
   groupDownloadTasks,
   groupKey,
 } from "./libraryCache";
+import { fetchDownloadCatalog } from "./cacheApi";
 import { getOfflineProgress, setOfflineProgress } from "./offlineProgress";
 import { useHost } from "./HostContext";
 
@@ -38,7 +39,7 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
   const groupTasks = useMemo(() => {
     if (!task) return [];
     const key = groupKey(task);
-    const group = groupDownloadTasks(tasks).find(g => g.key === key);
+    const group = groupDownloadTasks(tasks, {}, {}).find(g => g.key === key);
     return (group?.tasks ?? []).filter(t => t.state === "completed");
   }, [tasks, task]);
 
@@ -60,9 +61,9 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
   );
 
   const loadTasks = useCallback(async () => {
-    const list = await invoke<DownloadTask[]>("download_manage", { action: "list", params: {} });
-    setTasks(list);
-    return list;
+    const catalog = await fetchDownloadCatalog();
+    setTasks(catalog.tasks);
+    return catalog.tasks;
   }, []);
 
   const prepare = useCallback(async () => {

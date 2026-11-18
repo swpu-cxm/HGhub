@@ -2,7 +2,9 @@ use super::{
     hls::{self, download_fmp4_hls, download_progressive, detect_fmp4_hls},
     hls_mpegts::{self, detect_mpegts_hls, download_mpegts_hls},
     progress::{DownloadKind, DownloadState, DownloadTask},
+    reconcile::reconcile_download_tasks,
     store::DownloadStore,
+    work_meta::{work_key, WorkCacheMeta, WorkMetaStore},
 };
 use base64::Engine;
 use crate::{store::now, PluginError, Result};
@@ -30,6 +32,8 @@ pub struct DownloadManager {
 struct DownloadManagerInner {
     root: PathBuf,
     store: DownloadStore,
+    work_meta: WorkMetaStore,
+    works: Mutex<HashMap<String, WorkCacheMeta>>,
     client: Client,
     tasks: Mutex<Vec<DownloadTask>>,
     active: Semaphore,
@@ -41,11 +45,19 @@ impl DownloadManager {
         let cache = root.join("offline");
         std::fs::create_dir_all(&cache)?;
         let store = DownloadStore::open(&root)?;
-        let tasks = store.load()?;
+        let mut tasks = store.load()?;
+        let changed = reconcile_download_tasks(&mut tasks);
+        if changed {
+            store.save(&tasks)?;
+        }
+        let work_meta = WorkMetaStore::open(&root)?;
+        let works = work_meta.load()?;
         Ok(Self {
             inner: Arc::new(DownloadManagerInner {
                 root,
                 store,
+                work_meta,
+                works: Mutex::new(works),
                 client: Client::builder()
                     .redirect(reqwest::redirect::Policy::limited(8))
                     .build()
@@ -59,6 +71,25 @@ impl DownloadManager {
 
     pub async fn list(&self) -> Vec<DownloadTask> {
         self.inner.tasks.lock().unwrap().clone()
+    }
+
+    pub fn list_work_meta(&self) -> HashMap<String, WorkCacheMeta> {
+        self.inner.works.lock().unwrap().clone()
+    }
+
+    pub fn upsert_work_meta(&self, meta: WorkCacheMeta) -> Result<()> {
+        let key = work_key(&meta.plugin_id, &meta.media_id);
+        let mut works = self.inner.works.lock().unwrap();
+        works.insert(key, meta);
+        self.inner.work_meta.save(&works)
+    }
+
+    pub fn work_cover_local_path(&self, plugin_id: &str, media_id: &str) -> Option<PathBuf> {
+        let key = work_key(plugin_id, media_id);
+        let works = self.inner.works.lock().unwrap();
+        let rel = works.get(&key)?.cover_rel.as_ref()?.clone();
+        drop(works);
+        self.cover_local_path(&rel).ok()
     }
 
     pub fn cover_local_path(&self, rel: &str) -> Result<PathBuf> {
@@ -87,6 +118,18 @@ impl DownloadManager {
     ) -> Result<DownloadTask> {
         {
             let tasks = self.inner.tasks.lock().unwrap();
+            if let (Some(plugin_id), Some(media_id), Some(episode_id)) =
+                (&plugin_id, &media_id, &episode_id)
+            {
+                if let Some(existing) = tasks.iter().find(|t| {
+                    t.plugin_id.as_deref() == Some(plugin_id.as_str())
+                        && t.media_id.as_deref() == Some(media_id.as_str())
+                        && t.episode_id.as_deref() == Some(episode_id.as_str())
+                        && !matches!(t.state, DownloadState::Cancelled | DownloadState::Failed)
+                }) {
+                    return Ok(existing.clone());
+                }
+            }
             if tasks.iter().any(|t| {
                 t.source_url == source_url
                     && t.state != DownloadState::Cancelled
@@ -124,8 +167,9 @@ impl DownloadManager {
         if let Some(url) = cover_url.filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
             let mgr = self.clone();
             let id = id.clone();
+            let headers = task.headers.clone();
             tokio::spawn(async move {
-                let _ = mgr.fetch_cover(&id, &url).await;
+                let _ = mgr.fetch_cover(&id, &url, &headers).await;
             });
         }
         self.kick(id).await;
@@ -351,17 +395,22 @@ impl DownloadManager {
         Ok(())
     }
 
-    async fn fetch_cover(&self, id: &str, url: &str) -> Result<()> {
-        let bytes = self
-            .inner
-            .client
-            .get(url)
+    async fn fetch_cover(&self, id: &str, url: &str, headers: &HashMap<String, String>) -> Result<()> {
+        let mut req = self.inner.client.get(url);
+        for (key, value) in headers {
+            req = req.header(key, value);
+        }
+        let bytes = req
             .send()
             .await
             .map_err(|_| PluginError::internal("封面下载失败"))?
             .bytes()
             .await
             .map_err(|_| PluginError::internal("封面下载失败"))?;
+        self.write_cover_bytes(id, &bytes)
+    }
+
+    fn write_cover_bytes(&self, id: &str, bytes: &[u8]) -> Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -369,18 +418,77 @@ impl DownloadManager {
         std::fs::create_dir_all(&covers)?;
         let rel = format!("offline/covers/{id}.img");
         let path = self.inner.root.join(&rel);
-        std::fs::write(&path, &bytes)?;
+        std::fs::write(&path, bytes)?;
         let mut tasks = self.inner.tasks.lock().unwrap();
-        if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
-            t.cover_rel = Some(rel);
-            t.updated_at = now();
-        }
+        let work_pair = tasks
+            .iter_mut()
+            .find(|t| t.id == id)
+            .map(|t| {
+                t.cover_rel = Some(rel.clone());
+                t.updated_at = now();
+                (t.plugin_id.clone(), t.media_id.clone())
+            });
         self.inner.store.save(&tasks)?;
+        if let (Some(plugin_id), Some(media_id)) = work_pair.unwrap_or((None, None)) {
+            let _ = self.link_work_cover(&plugin_id, &media_id, bytes);
+        }
         Ok(())
     }
 
+    fn work_cover_rel(plugin_id: &str, media_id: &str) -> String {
+        let safe: String = format!("{plugin_id}_{media_id}")
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        format!("offline/covers/work_{safe}.img")
+    }
+
+    fn link_work_cover(&self, plugin_id: &str, media_id: &str, bytes: &[u8]) -> Result<()> {
+        let rel = Self::work_cover_rel(plugin_id, media_id);
+        let path = self.inner.root.join(&rel);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(&path, bytes)?;
+        let key = work_key(plugin_id, media_id);
+        let mut works = self.inner.works.lock().unwrap();
+        let entry = works.entry(key).or_insert(WorkCacheMeta {
+            plugin_id: plugin_id.to_string(),
+            media_id: media_id.to_string(),
+            title: String::new(),
+            plugin_name: None,
+            year: None,
+            episode_count: None,
+            description: None,
+            score: None,
+            tags: vec![],
+            cover_rel: None,
+            updated_at: now(),
+        });
+        entry.cover_rel = Some(rel);
+        entry.updated_at = now();
+        self.inner.work_meta.save(&works)
+    }
+
     pub async fn attach_cover(&self, id: &str, url: &str) -> Result<()> {
-        self.fetch_cover(id, url).await
+        let headers = self
+            .inner
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.headers.clone())
+            .unwrap_or_default();
+        self.fetch_cover(id, url, &headers).await
+    }
+
+    pub async fn attach_cover_data(&self, id: &str, data: Vec<u8>) -> Result<()> {
+        self.write_cover_bytes(id, &data)
     }
 
     async fn kick(&self, id: String) {

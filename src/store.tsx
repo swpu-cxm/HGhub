@@ -26,6 +26,7 @@ function useApplication() {
   const [theater, setTheater] = useState(false), [fs, setFs] = useState(false), [clean, setClean] = useState(false);
   const [strictSecurity, setStrict] = useState(true), [strictSecurityReady, setSecurityReady] = useState(false), [securityPending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [libraryCacheFocus, setLibraryCacheFocus] = useState<{ pluginId: string; mediaId: string } | null>(null);
   useEffect(() => {
     document.documentElement.classList.toggle("theme-light", theme === "light"); document.documentElement.style.colorScheme = theme;
     try { localStorage.setItem("hpp.theme", JSON.stringify(theme)); localStorage.setItem("hpp.startMuted", JSON.stringify(muteOnStartup)); localStorage.setItem("hpp.volume", JSON.stringify(volume)); } catch { setError("无法保存应用偏好"); }
@@ -39,10 +40,18 @@ function useApplication() {
     setStack([]);
     try { localStorage.setItem("hpp.libraryPanel", "cache"); } catch { /* ignore */ }
   }, []);
+  const openLibraryCacheWork = useCallback((pluginId: string, mediaId: string) => {
+    setTabRaw("profile");
+    setLibraryPanel("cache");
+    setLibraryCacheFocus({ pluginId, mediaId });
+    setStack([]);
+    try { localStorage.setItem("hpp.libraryPanel", "cache"); } catch { /* ignore */ }
+  }, []);
+  const clearLibraryCacheFocus = useCallback(() => setLibraryCacheFocus(null), []);
   const push = useCallback((p: PageInput) => setStack(old => [...old, { ...p, key: crypto.randomUUID() }]), []);
   const replace = useCallback((p: PageInput) => setStack(old => [...old.slice(0, -1), { ...p, key: crypto.randomUUID() }]), []);
   const pop = useCallback(() => setStack(old => old.slice(0, -1)), []);
-  return { watching, setWatching, platform, theme, setTheme, tab, setTab, stack, push, replace, pop, libraryPanel, setLibraryPanel, openLibraryCache, muteOnStartup, setMuteOnStartup, volume, setVolume, muted, setMuted, theater, setTheater, fs, setFs, clean, setClean, strictSecurity, strictSecurityReady, securityPending, setStrictSecurity, error };
+  return { watching, setWatching, platform, theme, setTheme, tab, setTab, stack, push, replace, pop, libraryPanel, setLibraryPanel, openLibraryCache, openLibraryCacheWork, libraryCacheFocus, clearLibraryCacheFocus, muteOnStartup, setMuteOnStartup, volume, setVolume, muted, setMuted, theater, setTheater, fs, setFs, clean, setClean, strictSecurity, strictSecurityReady, securityPending, setStrictSecurity, error };
 }
 const Context = createContext<ReturnType<typeof useApplication>>(null!);
 export const useStore = () => useContext(Context);
