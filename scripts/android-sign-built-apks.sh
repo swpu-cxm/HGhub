@@ -25,6 +25,14 @@ for f in "${APKS[@]}"; do
     --v4-signing-enabled false --out "$out" "$aligned"
   "$APKSIGNER" verify --print-certs "$out" | head -3
   node "$ROOT/scripts/verify-android-apk-cert.mjs" "$out"
+  PKG_JSON="$ROOT/package.json"
+  CODE="$(node -pe "JSON.parse(require('fs').readFileSync('$PKG_JSON','utf8')).androidVersionCode")"
+  VNAME="$(node -pe "JSON.parse(require('fs').readFileSync('$PKG_JSON','utf8')).version")"
+  if [ "$VERSION" != "$VNAME" ]; then
+    echo "VERSION 参数 $VERSION 与 package.json version $VNAME 不一致" >&2
+    exit 1
+  fi
+  node "$ROOT/scripts/verify-android-apk-metadata.mjs" "$out" "$VNAME" "$CODE"
   sha256sum "$out" | tee "$ROOT/checksums/HGhub_${VERSION}_${abi}.apk.sha256"
   rm -f "$aligned"
 done

@@ -11,6 +11,7 @@ object AppUpdateIntents {
   fun buildInstallIntent(uri: Uri): Intent =
     Intent(Intent.ACTION_VIEW).apply {
       setDataAndType(uri, APK_MIME)
+      addCategory(Intent.CATEGORY_DEFAULT)
       addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
         clipData = ClipData.newRawUri("", uri)

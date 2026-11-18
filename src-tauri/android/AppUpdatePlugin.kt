@@ -50,6 +50,75 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
+  fun getBuildInfo(invoke: Invoke) {
+    try {
+      val pm = activity.packageManager
+      val info =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          pm.getPackageInfo(activity.packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+          @Suppress("DEPRECATION")
+          pm.getPackageInfo(activity.packageName, 0)
+        }
+      val code =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+        else @Suppress("DEPRECATION") info.versionCode.toLong()
+      val ret = JSObject()
+      ret.put("packageName", activity.packageName)
+      ret.put("versionName", info.versionName ?: "")
+      ret.put("versionCode", code)
+      ret.put("sdkInt", Build.VERSION.SDK_INT)
+      invoke.resolve(ret)
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: error.javaClass.simpleName)
+    }
+  }
+
+  @Command
+  fun inspectApk(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(InstallArgs::class.java)
+      val path = args.path.trim()
+      if (path.isEmpty()) {
+        invoke.reject("缺少 path")
+        return
+      }
+      val source = File(path)
+      if (!source.isFile) {
+        invoke.reject("找不到安装包：$path")
+        return
+      }
+      val pm = activity.packageManager
+      val flags =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+          PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+          @Suppress("DEPRECATION")
+          PackageManager.GET_SIGNATURES
+        }
+      @Suppress("DEPRECATION")
+      val info = pm.getPackageArchiveInfo(path, flags)
+      if (info == null) {
+        invoke.reject("PackageManager 无法解析 APK（getPackageArchiveInfo 为 null）")
+        return
+      }
+      info.applicationInfo?.sourceDir = path
+      info.applicationInfo?.publicSourceDir = path
+      val code =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode
+        else @Suppress("DEPRECATION") info.versionCode.toLong()
+      val ret = JSObject()
+      ret.put("packageName", info.packageName ?: "")
+      ret.put("versionName", info.versionName ?: "")
+      ret.put("versionCode", code)
+      ret.put("apkBytes", source.length())
+      invoke.resolve(ret)
+    } catch (error: Exception) {
+      invoke.reject(error.message ?: error.javaClass.simpleName)
+    }
+  }
+
+  @Command
   fun installApk(invoke: Invoke) {
     try {
       val args = invoke.parseArgs(InstallArgs::class.java)
@@ -87,7 +156,9 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
         }
       val handlers = pm.queryIntentActivities(intent, flags)
       if (handlers.isEmpty()) {
-        invoke.reject("系统未提供可用的 APK 安装程序")
+        invoke.reject(
+          "系统未返回 APK 安装程序（Android ${Build.VERSION.SDK_INT}）。请确认清单 queries 已声明 VIEW+package-archive，或改用文件管理器手动安装。",
+        )
         return
       }
       for (resolve in handlers) {

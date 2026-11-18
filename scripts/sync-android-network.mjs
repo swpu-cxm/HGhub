@@ -19,6 +19,18 @@ if (existsSync(manifest)) {
   let xml = readFileSync(manifest, "utf8");
   if (/android:networkSecurityConfig=/.test(xml)) xml = xml.replace(/android:networkSecurityConfig="[^"]*"/, 'android:networkSecurityConfig="@xml/network_security_config"');
   else xml = xml.replace(/<application\b/, '<application android:networkSecurityConfig="@xml/network_security_config"');
+  if (!xml.includes("<queries>")) {
+    xml = xml.replace(
+      /<\/manifest>/,
+      `    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+</manifest>`,
+    );
+  }
   if (!xml.includes("REQUEST_INSTALL_PACKAGES")) {
     xml = xml.replace(
       /<uses-permission android:name="android.permission.INTERNET"\s*\/?>/,

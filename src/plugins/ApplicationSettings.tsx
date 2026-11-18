@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { checkAppUpdate, type AppRelease } from "../appUpdates";
 import { readPendingUpdate, savePendingUpdate, stageLabel, type AppUpdateStage } from "../appUpdateInstall";
+import { assertApkReadyForUpdate } from "../appUpdateValidate";
 import { useStore } from "../store";
 import { APP_VERSION, platform } from "../environment";
 import { UPDATE_GITHUB_OWNER, UPDATE_GITHUB_REPO } from "../updateConfig";
@@ -145,12 +146,19 @@ function AppUpdateSetting() {
         setStage("verifying");
         setMessage(`${stageLabel("verifying")}（${path.split(/[/\\]/).pop()}）`);
       }
+      setStage("verifying");
+      setMessage("正在校验安装包身份与版本…");
+      const meta = await assertApkReadyForUpdate(path, target, APP_VERSION);
+      setMessage(
+        `安装包 OK：versionCode ${meta.versionCode} · ${meta.versionName} · ${((meta.apkBytes ?? 0) / (1024 * 1024)).toFixed(2)} MiB`,
+      );
       setPendingPath(path);
       savePendingUpdate({ release: target, localPath: path, savedAt: Date.now() });
       await launchInstaller(path);
     } catch (e) {
       setStage("failed");
-      const msg = e instanceof Error ? e.message : "无法完成更新";
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = raw && raw !== "undefined" ? raw : "无法完成更新";
       setMessage(stageLabel("failed", msg));
       setError(msg);
     } finally { setBusy(false); }

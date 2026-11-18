@@ -37,6 +37,44 @@ pub fn debug_log(app: tauri::AppHandle, msg: String) -> Result<(), String> {
 }
 #[cfg(target_os = "android")]
 #[tauri::command]
+pub async fn app_update_build_info(
+    plugin: tauri::State<'_, AppUpdatePlugin>,
+) -> Result<Value, String> {
+    plugin
+        .0
+        .run_mobile_plugin_async("getBuildInfo", serde_json::json!({}))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn app_update_build_info() -> Result<Value, String> {
+    Err("当前平台不支持".into())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn app_update_inspect_apk(
+    path: String,
+    plugin: tauri::State<'_, AppUpdatePlugin>,
+) -> Result<Value, String> {
+    plugin
+        .0
+        .run_mobile_plugin_async("inspectApk", serde_json::json!({ "path": path }))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub async fn app_update_inspect_apk(path: String) -> Result<Value, String> {
+    let _ = path;
+    Err("当前平台不支持".into())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
 pub async fn app_update_install(
     path: String,
     plugin: tauri::State<'_, AppUpdatePlugin>,

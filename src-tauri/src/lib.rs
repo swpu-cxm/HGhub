@@ -65,6 +65,8 @@ pub fn run() {
             commands::debug_log,
             commands::open_url,
             download_commands::download_manage,
+            commands::app_update_build_info,
+            commands::app_update_inspect_apk,
             commands::app_update_install,
             commands::app_update_permissions,
             commands::app_update_open_install_permission,
