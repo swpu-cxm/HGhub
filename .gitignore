@@ -52,3 +52,7 @@ docs/API.md
 /docs/todo.md
 /docs/plugin-protocol/HANDOFF.md
 /rules/
+
+release-out/
+checksums/
+
