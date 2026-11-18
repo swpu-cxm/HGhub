@@ -10,7 +10,7 @@ const manifest = join(main, "AndroidManifest.xml");
 if (existsSync(manifest)) {
   const java = join(main, "java/com/hghub/player");
   mkdirSync(java, { recursive: true });
-  for (const file of ["OrientationPlugin.kt", "AppUpdatePlugin.kt"]) {
+  for (const file of ["OrientationPlugin.kt", "AppUpdatePlugin.kt", "AppUpdateIntents.kt"]) {
     copyFileSync(join(androidSrc, file), join(java, file));
   }
   mkdirSync(join(main, "res/xml"), { recursive: true });

@@ -1,7 +1,9 @@
 package com.hghub.player
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -51,25 +53,60 @@ class AppUpdatePlugin(private val activity: Activity) : Plugin(activity) {
   fun installApk(invoke: Invoke) {
     try {
       val args = invoke.parseArgs(InstallArgs::class.java)
-      val source = File(args.path)
-      if (!source.exists()) {
-        invoke.reject("找不到安装包")
+      val path = args.path.trim()
+      if (path.isEmpty()) {
+        invoke.reject("缺少安装包路径")
         return
       }
-      val uri = FileProvider.getUriForFile(
-        activity,
-        activity.packageName + ".fileprovider",
-        source,
-      )
-      val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, "application/vnd.android.package-archive")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      val source = File(path)
+      if (!source.isFile) {
+        invoke.reject("找不到安装包：$path")
+        return
       }
-      activity.startActivity(intent)
-      invoke.resolve()
+      if (source.length() < 64 * 1024) {
+        invoke.reject("安装包过小（${source.length()} 字节），可能下载不完整")
+        return
+      }
+      val authority = activity.packageName + ".fileprovider"
+      val uri =
+        try {
+          FileProvider.getUriForFile(activity, authority, source)
+        } catch (error: IllegalArgumentException) {
+          invoke.reject(
+            "无法通过 FileProvider 读取安装包，请确认文件位于应用私有 updates 目录",
+          )
+          return
+        }
+      val intent = AppUpdateIntents.buildInstallIntent(uri)
+      val pm = activity.packageManager
+      val flags =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+          PackageManager.MATCH_DEFAULT_ONLY
+        } else {
+          0
+        }
+      val handlers = pm.queryIntentActivities(intent, flags)
+      if (handlers.isEmpty()) {
+        invoke.reject("系统未提供可用的 APK 安装程序")
+        return
+      }
+      for (resolve in handlers) {
+        val pkg = resolve.activityInfo.packageName
+        activity.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      try {
+        activity.startActivity(intent)
+      } catch (error: ActivityNotFoundException) {
+        invoke.reject("无法启动安装程序界面")
+        return
+      }
+      val ret = JSObject()
+      ret.put("launched", true)
+      ret.put("installerCount", handlers.size)
+      ret.put("apkBytes", source.length())
+      invoke.resolve(ret)
     } catch (error: Exception) {
-      invoke.reject(error.message)
+      invoke.reject(error.message ?: error.javaClass.simpleName)
     }
   }
 
