@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import Hls from "hls.js";
 import workerPath from 'hls.js/dist/hls.worker.js?url';
-import { hlsPlaybackPath } from '../plugins/mediaCapabilities';
+import { hlsPlaybackPath, offlineHlsPlaybackPath } from '../plugins/mediaCapabilities';
 import { playbackTiming } from '../plugins/playbackTiming';
 import { pluginCommand, type PreparedMedia } from "../plugins/client";
 
@@ -19,7 +19,7 @@ interface Props {
   onSize: (w: number,h: number) => void; onBuffered: (fraction: number) => void;
   onBuffer?: (seconds: number) => void;
   onPlaying: () => void; onPause: () => void; onWaiting: () => void;
-  onEnded?: () => void; onError: () => void;
+  onEnded?: () => void; onError: (detail?: string) => void;
 }
 
 /** Same surface/handle as the original player, loading only host-prepared media URLs. */
@@ -38,7 +38,7 @@ export default forwardRef<VideoHandle, Props>(function VideoSurface(props, forwa
       const name=(error as {name?:string})?.name;
       if(name==='AbortError')return; // Source changes and pause interrupt pending play promises.
       if(name==='NotAllowedError'){wantsPlay.current=false;latest.current.onPause();}
-      else latest.current.onError();
+      else latest.current.onError(undefined);
     });
   };
   const pause=()=>{wantsPlay.current=false;playAttempt.current++;const v=ref.current;if(!v)return;const alreadyPaused=v.paused;v.pause();if(alreadyPaused)latest.current.onPause();};
@@ -55,31 +55,35 @@ export default forwardRef<VideoHandle, Props>(function VideoSurface(props, forwa
     const p=latest.current;
     const offline=p.media.localFile||p.media.sessionId.startsWith("offline:");
     const activity=(playing:boolean)=>{if(offline)return;void pluginCommand("media.activity",{sessionId:p.media.sessionId,playing}).then(()=>{if(!playing)window.dispatchEvent(new Event("hpp.playback.idle"));}).catch(()=>{});};
-    const fail=()=>{if(!disposed&&!failed){failed=true;latest.current.onError();}};
+    const failPlayback=(detail?:string)=>{if(!disposed&&!failed){failed=true;latest.current.onError(detail);}};
+    const onVideoError=()=>failPlayback();
     const metadata=()=>{if(p.position>0&&Number.isFinite(v.duration))v.currentTime=Math.min(p.position,Math.max(0,v.duration-.15));if(latest.current.active&&wantsPlay.current)play();};
     const playing=()=>{if(!disposed){activity(true);latest.current.onPlaying();}};
     const paused=()=>{if(!disposed&&v.paused){activity(false);latest.current.onTime(v.currentTime);if(!v.ended){if(wantsPlay.current&&latest.current.active&&v.readyState<3)latest.current.onWaiting();else latest.current.onPause();}}};
     const visibility=()=>{if(document.hidden){resume=!v.paused;v.pause();hls.current?.stopLoad();}else if(resume){resume=false;if(latest.current.active){hls.current?.startLoad(v.currentTime);play();}}};
     v.muted=p.muted;v.volume=p.volume;v.playbackRate=p.rate;
-    v.addEventListener("loadedmetadata",metadata);v.addEventListener("error",fail);v.addEventListener("playing",playing);v.addEventListener("pause",paused);document.addEventListener("visibilitychange",visibility);
-    const hlsPath=p.media.format==="hls"&&(p.media.localFile?"native":hlsPlaybackPath(v));
+    v.addEventListener("loadedmetadata",metadata);v.addEventListener("error",onVideoError);v.addEventListener("playing",playing);v.addEventListener("pause",paused);document.addEventListener("visibilitychange",visibility);
+    const hlsPath=p.media.format==="hls"&&(p.media.localFile?offlineHlsPlaybackPath(v):hlsPlaybackPath(v));
     if(hlsPath==="mse"){
       const engine=new Hls({enableWorker:true,workerPath,autoStartLoad:p.active&&!document.hidden,startPosition:Math.max(0,p.position),backBufferLength:30,interstitialsController:undefined,contentSteeringController:undefined,enableInterstitialPlayback:false});
       hls.current=engine;engine.loadSource(p.media.url);engine.attachMedia(v);
-      engine.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)fail();});
-    }else v.src=p.media.url;
+      engine.on(Hls.Events.ERROR,(_,data)=>{
+        if(data.fatal)failPlayback(`${data.type}/${data.details}${data.response?.code?` HTTP ${data.response.code}`:""}${data.error?.message?`: ${data.error.message}`:""}`);
+      });
+    }else if(hlsPath==="native") v.src=p.media.url;
+    else failPlayback("HLS_UNSUPPORTED");
     playbackTiming(p.media.sessionId,'media-load');
     if(v.requestVideoFrameCallback)firstFrame=v.requestVideoFrameCallback(()=>{if(!disposed){playbackTiming(p.media.sessionId,'first-frame',started);if(p.media.requestedAt!==undefined)playbackTiming(p.media.sessionId,'intent-to-first-frame',p.media.requestedAt);}});
     const expiry=p.media.playback.expiresAt;
-    const timer=expiry?window.setTimeout(fail,Math.max(1000,Math.min(2_147_483_647,expiry-Date.now()-5000))):undefined;
-    return()=>{disposed=true;playAttempt.current++;if(firstFrame!==undefined)v.cancelVideoFrameCallback(firstFrame);clearTimeout(timer);activity(false);document.removeEventListener("visibilitychange",visibility);v.removeEventListener("loadedmetadata",metadata);v.removeEventListener("error",fail);v.removeEventListener("playing",playing);v.removeEventListener("pause",paused);hls.current?.destroy();hls.current=null;v.pause();v.removeAttribute("src");v.load();};
+    const timer=expiry?window.setTimeout(()=>failPlayback(),Math.max(1000,Math.min(2_147_483_647,expiry-Date.now()-5000))):undefined;
+    return()=>{disposed=true;playAttempt.current++;if(firstFrame!==undefined)v.cancelVideoFrameCallback(firstFrame);clearTimeout(timer);activity(false);document.removeEventListener("visibilitychange",visibility);v.removeEventListener("loadedmetadata",metadata);v.removeEventListener("error",onVideoError);v.removeEventListener("playing",playing);v.removeEventListener("pause",paused);hls.current?.destroy();hls.current=null;v.pause();v.removeAttribute("src");v.load();};
   },[props.media.sessionId]);
   useEffect(()=>{const v=ref.current;if(v){v.muted=props.muted;v.volume=props.volume;v.playbackRate=props.rate;}},[props.muted,props.volume,props.rate]);
   useEffect(()=>{if(!props.active||document.hidden){ref.current?.pause();hls.current?.stopLoad();}else if(hls.current)hls.current.startLoad(ref.current?.currentTime||props.position);},[props.active,props.media.sessionId]);
   const dimensions=()=>{const v=ref.current!;if(Number.isFinite(v.duration))latest.current.onDuration(v.duration);if(v.videoWidth)latest.current.onSize(v.videoWidth,v.videoHeight);};
   const buffered=(v:HTMLVideoElement)=>{props.onBuffered(v.duration&&v.buffered.length?v.buffered.end(v.buffered.length-1)/v.duration:0);let ahead=0;for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=v.currentTime+.1&&v.buffered.end(i)>v.currentTime)ahead=v.buffered.end(i)-v.currentTime;props.onBuffer?.(ahead);};
   return <div className="absolute inset-0 overflow-hidden" onClick={props.onClick}>
-    <video ref={ref} playsInline preload="auto" autoPlay={props.autoPlay && props.active} crossOrigin="anonymous" poster={props.poster} className="w-full h-full"
+    <video ref={ref} playsInline preload="auto" autoPlay={props.autoPlay && props.active} crossOrigin={props.media.localFile?undefined:"anonymous"} poster={props.poster} className="w-full h-full"
       style={{objectFit:props.fit,transform:`translate(${props.panX}px, ${props.panY}px) scale(${props.scale})`,transition:props.isGesturing?"none":"transform .18s ease"}}
       onLoadedMetadata={dimensions} onLoadedData={dimensions} onTimeUpdate={e=>{props.onTime(e.currentTarget.currentTime);buffered(e.currentTarget);}}
       onProgress={e=>buffered(e.currentTarget)}

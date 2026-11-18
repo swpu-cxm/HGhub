@@ -12,12 +12,18 @@ assert.equal(offlinePlaybackFormat("hlsMpegTs"), "hls");
 assert.equal(offlinePlaybackFormat("hlsFmp4"), "progressive");
 assert.equal(offlinePlaybackFormat("progressiveMp4"), "progressive");
 
-const downloads = readFileSync(join(root, "src/plugins/DownloadsPage.tsx"), "utf8");
-assert.doesNotMatch(downloads, /window\.location/);
-assert.match(downloads, /kind:\s*"offlinePlay"/);
+const cache = readFileSync(join(root, "src/plugins/LibraryCachePanel.tsx"), "utf8");
+assert.doesNotMatch(cache, /window\.location/);
+assert.match(cache, /kind:\s*"offlinePlay"/);
 
 const video = readFileSync(join(root, "src/components/VideoSurface.tsx"), "utf8");
 assert.match(video, /localFile/);
+assert.match(video, /offlineHlsPlaybackPath/);
+assert.doesNotMatch(video, /localFile\s*\?\s*"native"/);
+
+const lib = readFileSync(join(root, "src/plugins/LibraryPage.tsx"), "utf8");
+assert.match(lib, /缓存/);
+assert.match(lib, /LibraryCachePanel/);
 
 const net = readFileSync(join(root, "src-tauri/android/network_security_config.xml"), "utf8");
 assert.match(net, /asset\.localhost/);

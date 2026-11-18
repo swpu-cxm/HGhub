@@ -158,6 +158,10 @@ fn parse_media_segments(playlist: &str, base: &str) -> Result<Vec<MediaSegment>>
     Ok(out)
 }
 
+pub fn key_uri_from_tag(line: &str) -> Option<String> {
+    tag_attr(line.trim_start_matches("#EXT-X-KEY:"), "URI")
+}
+
 fn tag_attr(rest: &str, name: &str) -> Option<String> {
     let needle = format!("{name}=");
     for part in rest.split(',') {

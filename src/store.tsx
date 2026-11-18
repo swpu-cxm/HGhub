@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { platform } from "./environment";
 import type { SourceStart } from "./plugins/sourceMatching";
 export type Tab = "home" | "category" | "search" | "profile";
+export type LibraryPanel = "favorite" | "cloud" | "history" | "cache";
 export type Theme = "dark" | "light";
 export type OfflinePlayPage = { kind: "offlinePlay"; downloadId: string; title: string; episodeLabel?: string; mediaKind: "progressiveMp4" | "hlsFmp4" | "hlsMpegTs" };
 export type PageInput = { kind: "plugins"; focusId?: string } | { kind: "settings" } | { kind: "downloads" } | OfflinePlayPage | { kind: "media"; pluginId: string; mediaId: string; start?: SourceStart } | { kind: "section"; pluginId: string; sectionId: string; title?: string } | { kind: "live"; pluginId: string } | { kind: "articles"; pluginId: string } | { kind: "article"; pluginId: string; articleId: string } | { kind: "feed"; pluginId: string } | { kind: "recommendations"; pluginId: string };
@@ -11,6 +12,13 @@ function read<T>(key: string, fallback: T): T { try { return JSON.parse(localSto
 function useApplication() {
   const [theme, setTheme] = useState<Theme>(() => read<string>("hpp.theme", "dark") === "light" ? "light" : "dark");
   const [tab, setTabRaw] = useState<Tab>("home"), [stack, setStack] = useState<Page[]>([]);
+  const [libraryPanel, setLibraryPanel] = useState<LibraryPanel>(() => {
+    try {
+      const v = localStorage.getItem("hpp.libraryPanel");
+      if (v === "cache" || v === "cloud" || v === "history") return v;
+    } catch { /* ignore */ }
+    return "favorite";
+  });
   const [muteOnStartup, setMuteOnStartup] = useState(() => read<boolean>("hpp.startMuted", true) !== false);
   const [volume, setVolume] = useState(() => { const v = read("hpp.volume", 0.7); return typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.7; });
   const [watching, setWatching] = useState(false);
@@ -25,10 +33,16 @@ function useApplication() {
   useEffect(() => { void invoke<{strict_security:boolean}>("app_boot").then(v => { setStrict(v.strict_security); setSecurityReady(true); }).catch(() => setError("无法读取网络设置")); }, []);
   const setStrictSecurity = useCallback(async (strict: boolean) => { setPending(true); try { setStrict(await invoke<boolean>("security_set", { strict })); } finally { setPending(false); } }, []);
   const setTab = useCallback((tab: Tab) => { setTabRaw(tab); setStack([]); }, []);
+  const openLibraryCache = useCallback(() => {
+    setTabRaw("profile");
+    setLibraryPanel("cache");
+    setStack([]);
+    try { localStorage.setItem("hpp.libraryPanel", "cache"); } catch { /* ignore */ }
+  }, []);
   const push = useCallback((p: PageInput) => setStack(old => [...old, { ...p, key: crypto.randomUUID() }]), []);
   const replace = useCallback((p: PageInput) => setStack(old => [...old.slice(0, -1), { ...p, key: crypto.randomUUID() }]), []);
   const pop = useCallback(() => setStack(old => old.slice(0, -1)), []);
-  return { watching, setWatching, platform, theme, setTheme, tab, setTab, stack, push, replace, pop, muteOnStartup, setMuteOnStartup, volume, setVolume, muted, setMuted, theater, setTheater, fs, setFs, clean, setClean, strictSecurity, strictSecurityReady, securityPending, setStrictSecurity, error };
+  return { watching, setWatching, platform, theme, setTheme, tab, setTab, stack, push, replace, pop, libraryPanel, setLibraryPanel, openLibraryCache, muteOnStartup, setMuteOnStartup, volume, setVolume, muted, setMuted, theater, setTheater, fs, setFs, clean, setClean, strictSecurity, strictSecurityReady, securityPending, setStrictSecurity, error };
 }
 const Context = createContext<ReturnType<typeof useApplication>>(null!);
 export const useStore = () => useContext(Context);

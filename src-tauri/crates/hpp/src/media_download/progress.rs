@@ -30,6 +30,18 @@ pub struct DownloadTask {
     pub kind: DownloadKind,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    #[serde(default)]
+    pub plugin_id: Option<String>,
+    #[serde(default)]
+    pub media_id: Option<String>,
+    #[serde(default)]
+    pub episode_id: Option<String>,
+    #[serde(default)]
+    pub episode_index: Option<u32>,
+    #[serde(default)]
+    pub episode_count: Option<u32>,
+    #[serde(default)]
+    pub cover_rel: Option<String>,
     pub state: DownloadState,
     pub bytes_done: u64,
     pub bytes_total: Option<u64>,
@@ -49,6 +61,12 @@ impl DownloadTask {
         source_url: String,
         kind: DownloadKind,
         headers: HashMap<String, String>,
+        plugin_id: Option<String>,
+        media_id: Option<String>,
+        episode_id: Option<String>,
+        episode_index: Option<u32>,
+        episode_count: Option<u32>,
+        cover_rel: Option<String>,
         now: u64,
     ) -> Self {
         Self {
@@ -58,6 +76,12 @@ impl DownloadTask {
             source_url,
             kind,
             headers,
+            plugin_id,
+            media_id,
+            episode_id,
+            episode_index,
+            episode_count,
+            cover_rel,
             state: DownloadState::Queued,
             bytes_done: 0,
             bytes_total: None,

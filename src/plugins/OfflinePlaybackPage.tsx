@@ -20,6 +20,7 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
   const videoRef = useRef<VideoHandle>(null);
   const [media, setMedia] = useState<PreparedMedia | null>(null);
   const [error, setError] = useState("");
+  const [diag, setDiag] = useState("");
   const [phase, setPhase] = useState<"loading" | "playing" | "paused">("loading");
   const position = useRef(0);
 
@@ -32,10 +33,26 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
     let live = true;
     void (async () => {
       setError("");
+      setDiag("");
       try {
-        const path = await invoke<string>("download_manage", { action: "localPath", params: { id: downloadId } });
+        const prep = await invoke<{
+          path: string;
+          packageValid?: boolean;
+          validateError?: string;
+          segmentCount?: number;
+          aes128KeyPresent?: boolean;
+        }>("download_manage", { action: "preparePlayback", params: { id: downloadId } });
+        const bits = [
+          prep.packageValid === false && prep.validateError ? `校验: ${prep.validateError}` : null,
+          prep.segmentCount != null ? `分片 ${prep.segmentCount}` : null,
+          prep.aes128KeyPresent != null ? `AES-128: ${prep.aes128KeyPresent ? "ok" : "缺密钥"}` : null,
+        ].filter(Boolean);
+        if (bits.length) setDiag(bits.join(" · "));
+        if (prep.packageValid === false) {
+          throw new Error(prep.validateError || "离线包校验失败");
+        }
         if (!live) return;
-        setMedia(buildOfflinePreparedMedia(downloadId, path, kind));
+        setMedia(buildOfflinePreparedMedia(downloadId, prep.path, kind));
       } catch (e) {
         if (live) setError(e instanceof Error ? e.message : "无法准备离线播放");
       }
@@ -53,6 +70,7 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
         </div>
       </header>
       <Notice error={error}/>
+      {diag && !error && <p className="px-4 text-xs text-white/50">{diag}</p>}
       <div className="relative flex-1 min-h-0 bg-black">
         {media && !error ? (
           <>
@@ -78,9 +96,11 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
               onPause={() => setPhase("paused")}
               onWaiting={() => setPhase("loading")}
               onBuffered={() => {}}
-              onError={() => setError(kind === "hlsMpegTs"
-                ? "离线 HLS 无法播放。请确认缓存包完整（清单、分片与 aes128.key）；若仍失败请反馈。"
-                : "离线视频无法播放，请确认文件未损坏。")}
+              onError={detail => setError(
+                kind === "hlsMpegTs"
+                  ? `离线 HLS 播放失败${detail ? ` [${detail}]` : ""}。引擎: Hls.js/MSE · 清单/分片/aes128.key 已按本地包加载。`
+                  : `离线视频无法播放${detail ? ` [${detail}]` : ""}`,
+              )}
             />
             {phase === "loading" && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">

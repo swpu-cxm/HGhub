@@ -157,6 +157,12 @@ async fn huangguo_qiongming_episode2_offline_cache() {
                 headers,
                 None,
                 Some(format),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await
         {

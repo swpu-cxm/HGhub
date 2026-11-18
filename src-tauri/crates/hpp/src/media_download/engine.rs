@@ -13,6 +13,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Instant,
 };
 use tokio::sync::Semaphore;
 use uuid::Uuid;
@@ -59,6 +60,15 @@ impl DownloadManager {
         self.inner.tasks.lock().unwrap().clone()
     }
 
+    pub fn cover_local_path(&self, rel: &str) -> Result<PathBuf> {
+        let path = self.inner.root.join(rel);
+        if path.is_file() {
+            Ok(path)
+        } else {
+            Err(PluginError::invalid("封面文件不存在"))
+        }
+    }
+
     pub async fn enqueue(
         &self,
         title: String,
@@ -67,6 +77,12 @@ impl DownloadManager {
         headers: HashMap<String, String>,
         kind: Option<DownloadKind>,
         source_format: Option<&str>,
+        plugin_id: Option<String>,
+        media_id: Option<String>,
+        episode_id: Option<String>,
+        episode_index: Option<u32>,
+        episode_count: Option<u32>,
+        cover_url: Option<String>,
     ) -> Result<DownloadTask> {
         {
             let tasks = self.inner.tasks.lock().unwrap();
@@ -84,11 +100,32 @@ impl DownloadManager {
         };
         let id = Uuid::new_v4().to_string();
         let ts = now();
-        let task = DownloadTask::new(id.clone(), title, episode_label, source_url, kind, headers, ts);
+        let task = DownloadTask::new(
+            id.clone(),
+            title,
+            episode_label,
+            source_url,
+            kind,
+            headers,
+            plugin_id,
+            media_id,
+            episode_id,
+            episode_index,
+            episode_count,
+            None,
+            ts,
+        );
         {
             let mut tasks = self.inner.tasks.lock().unwrap();
             tasks.push(task.clone());
             self.inner.store.save(&tasks)?;
+        }
+        if let Some(url) = cover_url.filter(|u| u.starts_with("http://") || u.starts_with("https://")) {
+            let mgr = self.clone();
+            let id = id.clone();
+            tokio::spawn(async move {
+                let _ = mgr.fetch_cover(&id, &url).await;
+            });
         }
         self.kick(id).await;
         Ok(task)
@@ -135,6 +172,71 @@ impl DownloadManager {
         let pkg = self.inner.root.join(format!("offline/pkg_{id}"));
         let _ = std::fs::remove_dir_all(pkg);
         Ok(())
+    }
+
+    pub fn prepare_playback(&self, id: &str) -> Result<serde_json::Value> {
+        let tasks = self.inner.tasks.lock().unwrap();
+        let task = tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| PluginError::invalid("找不到下载任务"))?;
+        if task.state != DownloadState::Completed {
+            return Err(PluginError::invalid("任务尚未完成"));
+        }
+        let rel = task
+            .output_rel
+            .as_ref()
+            .ok_or_else(|| PluginError::internal("缺少输出路径"))?;
+        let path = self.inner.root.join(rel);
+        if !path.exists() {
+            return Err(PluginError::invalid("离线文件已不存在"));
+        }
+        let kind = task.kind.clone();
+        let playback_path = path.clone();
+        drop(tasks);
+        let mut out = serde_json::json!({
+            "path": playback_path.to_string_lossy(),
+            "downloadId": id,
+        });
+        out["kind"] = serde_json::to_value(&kind).unwrap_or(serde_json::Value::Null);
+        if kind == DownloadKind::HlsMpegTs {
+            let pkg = if path.is_file() {
+                path.parent()
+                    .ok_or_else(|| PluginError::invalid("HLS 路径无效"))?
+                    .to_path_buf()
+            } else {
+                path.clone()
+            };
+            match hls_mpegts::validate_offline_package(&pkg) {
+                Ok(()) => {
+                    let index = pkg.join("index.m3u8");
+                    let text = std::fs::read_to_string(&index)?;
+                    let segments = text
+                        .lines()
+                        .filter(|l| {
+                            let t = l.trim();
+                            !t.is_empty() && !t.starts_with('#')
+                        })
+                        .count();
+                    let has_key = text.contains("#EXT-X-KEY:METHOD=AES-128");
+                    let key_ok = has_key
+                        && text
+                            .lines()
+                            .find(|l| l.contains("#EXT-X-KEY:"))
+                            .and_then(|l| hls_mpegts::key_uri_from_tag(l))
+                            .map(|k| pkg.join(&k).is_file())
+                            .unwrap_or(false);
+                    out["packageValid"] = true.into();
+                    out["segmentCount"] = segments.into();
+                    out["aes128KeyPresent"] = key_ok.into();
+                }
+                Err(e) => {
+                    out["packageValid"] = false.into();
+                    out["validateError"] = e.message.into();
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn local_playback_path(&self, id: &str) -> Result<std::path::PathBuf> {
@@ -186,11 +288,47 @@ impl DownloadManager {
             .iter_mut()
             .find(|t| t.id == id)
             .ok_or_else(|| PluginError::invalid("找不到下载任务"))?;
+        let running = matches!(state, DownloadState::Running);
         task.state = state;
         task.updated_at = now();
         task.error = error.map(str::to_string);
+        if !running {
+            task.speed_bps = 0.0;
+        }
         self.inner.store.save(&tasks)?;
         Ok(())
+    }
+
+    async fn fetch_cover(&self, id: &str, url: &str) -> Result<()> {
+        let bytes = self
+            .inner
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|_| PluginError::internal("封面下载失败"))?
+            .bytes()
+            .await
+            .map_err(|_| PluginError::internal("封面下载失败"))?;
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let covers = self.inner.root.join("offline/covers");
+        std::fs::create_dir_all(&covers)?;
+        let rel = format!("offline/covers/{id}.img");
+        let path = self.inner.root.join(&rel);
+        std::fs::write(&path, &bytes)?;
+        let mut tasks = self.inner.tasks.lock().unwrap();
+        if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
+            t.cover_rel = Some(rel);
+            t.updated_at = now();
+        }
+        self.inner.store.save(&tasks)?;
+        Ok(())
+    }
+
+    pub async fn attach_cover(&self, id: &str, url: &str) -> Result<()> {
+        self.fetch_cover(id, url).await
     }
 
     async fn kick(&self, id: String) {
@@ -272,11 +410,10 @@ impl DownloadManager {
         } else {
             temp_path.metadata().map(|m| m.len()).unwrap_or(0)
         };
-        let noop = |_: u64, _: Option<u64>| !flag.load(Ordering::Relaxed);
         let mut attempt = 0u32;
         let result: Result<u64> = loop {
             attempt += 1;
-            let mut progress = noop;
+            let mut progress = self.progress_callback(&id, flag.clone());
             let run = match snapshot.kind {
                 DownloadKind::ProgressiveMp4 => {
                     download_progressive(
@@ -338,6 +475,7 @@ impl DownloadManager {
                 if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
                     t.state = DownloadState::Completed;
                     t.bytes_done = bytes_done;
+                    t.speed_bps = 0.0;
                     t.updated_at = now();
                     t.error = None;
                 }
@@ -386,6 +524,60 @@ async fn classify_url(
         }
     }
     DownloadKind::ProgressiveMp4
+}
+
+impl DownloadManager {
+    fn progress_callback(
+        &self,
+        id: &str,
+        cancel: Arc<AtomicBool>,
+    ) -> impl FnMut(u64, Option<u64>) -> bool {
+        let inner = self.inner.clone();
+        let id = id.to_string();
+        let mut last_save = Instant::now();
+        let mut last_bytes = 0u64;
+        let mut last_tick = Instant::now();
+        move |bytes_done, bytes_total| {
+            if cancel.load(Ordering::Relaxed) {
+                return false;
+            }
+            let now = Instant::now();
+            let dt = now.duration_since(last_tick).as_secs_f64();
+            let mut speed_sample = None::<f64>;
+            if dt >= 0.2 {
+                let delta = bytes_done.saturating_sub(last_bytes);
+                last_bytes = bytes_done;
+                last_tick = now;
+                if dt > 0.0 {
+                    speed_sample = Some(delta as f64 / dt);
+                }
+            }
+            let mut tasks = inner.tasks.lock().unwrap();
+            if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
+                t.bytes_done = bytes_done;
+                if let Some(total) = bytes_total {
+                    t.bytes_total = Some(total);
+                }
+                if let Some(sample) = speed_sample {
+                    t.speed_bps = if t.speed_bps > 0.0 {
+                        t.speed_bps * 0.65 + sample * 0.35
+                    } else {
+                        sample
+                    };
+                }
+                t.updated_at = now_ms();
+            }
+            if last_save.elapsed().as_millis() >= 800 {
+                let _ = inner.store.save(&tasks);
+                last_save = Instant::now();
+            }
+            true
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    crate::store::now()
 }
 
 fn sanitize(name: &str) -> String {
