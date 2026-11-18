@@ -139,9 +139,16 @@ export async function testWatchExperience({ page, browser, dispatch, base, ui, r
   assert.equal(await mobile.locator(".hg-tabbar").count(), 0);
   await shot(mobile, "mobile-playing");
   await button(mobile, "更多").click();
+  await button(mobile.locator(".hg-more-shortcuts"), "缓存本集").waitFor();
+  assert(await button(mobile.locator(".hg-more-shortcuts"), "缓存管理").isVisible(), "more menu exposes offline cache entry");
   await mobile.getByLabel("播放速度", { exact: true }).selectOption("1.5");
   assert.equal(await mobile.locator("video").evaluate(v => v.playbackRate), 1.5);
-  await shot(mobile, "mobile-more");
+  await shot(mobile, "mobile-more-cache");
+  await button(mobile.locator(".hg-more-shortcuts"), "缓存本集").click();
+  await mobile.getByText("离线缓存").waitFor();
+  await shot(mobile, "mobile-downloads-after-cache");
+  await button(mobile, "返回").click();
+  await button(mobile, "更多").click();
   await button(mobile, "关闭面板").click();
   await button(mobile, "锁定播放控制").click();
   await button(mobile, "解锁播放控制").click();
@@ -163,5 +170,5 @@ export async function testWatchExperience({ page, browser, dispatch, base, ui, r
   await mobile.locator(".hpp-category-preview").first().waitFor();
   await context.close();
   assert.deepEqual(errors, []);
-  report.passed.push("Mobile: home-only preview, themed bottom detail sheet, full playback hides navigation, speed/menu/lock, direct return and category detail gate");
+  report.passed.push("Mobile: home-only preview, themed bottom detail sheet, full playback hides navigation, speed/menu/lock, more-menu cache entry navigates to downloads, direct return and category detail gate");
 }

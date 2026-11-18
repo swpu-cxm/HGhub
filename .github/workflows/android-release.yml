@@ -134,7 +134,8 @@ jobs:
         run: |
           set -euo pipefail
           KS="$RUNNER_TEMP/release.keystore"
-          echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$KS"
+          trap 'rm -f "$KS"' EXIT
           BT="$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)"
           APKSIGNER="$ANDROID_SDK_ROOT/build-tools/$BT/apksigner"
           mkdir -p artifacts checksums

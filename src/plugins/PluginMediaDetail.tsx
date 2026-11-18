@@ -390,17 +390,28 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
     <PlaybackOptions stage="源" choices={choices.source} disabled={busy} onServer={serverId=>selectPlayback({serverId:serverId||undefined,streamIndex:0,resolverStreamIndex:0})} onStream={streamIndex=>selectPlayback({streamIndex,resolverStreamIndex:0})}/>
     {choices.resolver && <PlaybackOptions stage="解析器" choices={choices.resolver} disabled={busy} onServer={serverId=>selectPlayback({resolverServers:{...selection.current.resolverServers,[choices.resolver!.pluginId]:serverId},resolverStreamIndex:0})} onStream={resolverStreamIndex=>selectPlayback({resolverStreamIndex})}/>}</>}
     <button disabled={busy||!active} onClick={refresh}>刷新播放</button><button disabled={busy||!active} onClick={()=>selectPlayback({serverId:undefined,resolverId:undefined,streamIndex:0,resolverStreamIndex:0,resolverServers:{}})}>使用默认播放选择</button>
-    <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集</button>
+    <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集到离线</button>
+    <button type="button" onClick={()=>app.push({ kind: "downloads" })}>查看缓存管理</button>
     <button disabled={busy||!detail} onClick={()=>setSwitching(true)}>换源</button>
     {choices?.resolverRoute && <ResolverChooser key={choices.resolverRoute.host} route={choices.resolverRoute} busy={busy||!active} select={(resolverId,resolverHost)=>{const c=current.current;return c?play(c.ep,"switch",c.playlistId,{...selection.current,resolverId,resolverHost,resolverStreamIndex:0}):Promise.resolve(undefined);}}/>}</div></>;
   const detailPanel=detail?<><div className="legacy-detail-summary">{poster&&<img src={poster} alt=""/>}<div><h2>{detail.title}</h2><p>{plugin.meta.name}</p>{detail.score!==undefined&&<strong>{detail.score.toFixed(1)} 分</strong>}<p>{detail.episodeCount||currentList?.episodes.length||0} 集</p></div></div><h3>简介</h3><p className="hpp-description">{detail.description||"暂无简介"}</p>
     <button onClick={()=>void host.put(plugin.meta.id,detail,{tracking:!entry?.tracking}).catch(e=>setError(pluginError(e)))}>{entry?.tracking?"取消追更":"追更"}</button>
     {resume&&<button disabled={busy} onClick={()=>{const list=detail.playlists.find(p=>p.id===resume.playlistId),ep=list?.episodes.find(e=>e.id===resume.episodeId);if(list&&ep){setPlaylist(list.id);void play(ep,"play",list.id);}else setError("上次分集暂未加载，请加载对应播放列表后选集。");}}>继续观看 · {Math.floor(resume.positionSec)} 秒</button>}
-    {active&&<MediaInteractions plugin={plugin} detail={detail}/>}<button onClick={manage}>管理此插件</button></>:<p>{error||"正在读取作品…"}</p>;
+    {active&&<MediaInteractions plugin={plugin} detail={detail}/>}
+    <div className="hpp-cache-actions">
+      <button disabled={busy||!current.current?.ep} onClick={()=>void cacheEpisode()}>缓存本集</button>
+      <button type="button" onClick={()=>app.push({ kind: "downloads" })}>缓存管理</button>
+    </div>
+    <button onClick={manage}>管理此插件</button></>:<p>{error||"正在读取作品…"}</p>;
   const favoriteAction = () => { const item = detail || entryItem; if (item) void host.put(plugin.meta.id,item,{favorite:!entry?.favorite}).catch(e=>setError(pluginError(e))); };
+  const cacheDisabledReason = busy ? "正在处理播放或解析" : !current.current?.ep ? "请先选择并播放分集" : !canPlay ? "当前分集不可播放" : undefined;
   return <div className={`legacy-media-page ${fullPlayback ? "hg-watching" : homePreview ? "hg-discovering" : "hg-detail-entry"}`}>
     {playbackRequested &&
     <PluginPlayer {...presentation} playIntent={playIntent} mode={fullPlayback ? "full" : "preview"} onOpenDetail={openDetail} media={canPlay?media:null} preparing={busy && (transitioning.current || !media)} active={active && !detailOpen && !transitioning.current} position={position.current} error={error} onRetry={refresh}
+      onCacheEpisode={fullPlayback ? () => cacheEpisode() : undefined}
+      onOpenDownloads={fullPlayback ? () => app.push({ kind: "downloads" }) : undefined}
+      cacheDisabledReason={fullPlayback ? cacheDisabledReason : "预览模式不支持缓存"}
+      cacheBusy={busy}
       previousPreview={fullPlayback ? previousEpisode ? {title:previousEpisode.label || '上一集',poster} : undefined : presentation.previousPreview}
       nextPreview={fullPlayback ? nextEpisode ? {title:nextEpisode.label || '下一集',poster} : undefined : presentation.nextPreview}
       onPanelChange={panel=>{if(panel==='detail'||panel==='episodes')setNeedsDetail(true);}}

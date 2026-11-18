@@ -25,11 +25,16 @@ openssl enc -d -aes-256-cbc -pbkdf2 -in hghub-release.keystore.enc -out hghub-re
 keytool -list -v -keystore hghub-release.keystore -alias hghub | rg SHA256
 ```
 
-4. 配置 GitHub Actions Secrets（名称与上游 `release.yml` 相同）：
+4. 配置 GitHub Actions Secrets（官方推荐：仓库或 Environment secrets，勿写入源码 / APK）  
+   文档：[Using secrets in GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)、[Storing Base64 binary blobs as secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#storing-base64-binary-blobs-as-secrets)（keystore &lt; 48KB 适用）、[Storing large secrets](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#storing-large-secrets)（超限时用加密文件 + 口令 secret）。
 
-- `ANDROID_KEY_BASE64`：`base64 -w0 hghub-release.keystore`（Linux）或 `base64 -i hghub-release.keystore`（macOS）
-- `ANDROID_KEY_ALIAS`：`hghub`
-- `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_PASSWORD`：解密所得 store 口令
+| Secret | 值来源 |
+| --- | --- |
+| `ANDROID_KEY_BASE64` | `base64 -w0 hghub-release.keystore`（Linux）或 `base64 -i …`（macOS），再 `gh secret set ANDROID_KEY_BASE64 < keystore.base64` |
+| `ANDROID_KEY_ALIAS` | `hghub` |
+| `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_PASSWORD` | store 口令（经 env 注入 runner，禁止 echo 到日志） |
+
+维护者需在仓库 **Settings → Secrets and variables → Actions**（或 Environment）中自行添加；CI 工作流仅检测非空并 `base64 --decode` 到临时文件，签名后删除。
 
 ## CI 行为
 

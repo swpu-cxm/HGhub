@@ -12,7 +12,7 @@ import PlaybackLock from "./PlaybackLock";
 import { registerBackHandler } from "../back";
 import { useVerticalSwipe } from './useVerticalSwipe';
 import type { PreparedMedia } from "../plugins/client";
-import { IMore, IHeart, IHeartF, IPip, IBack, IBoltF, IChevR, IChevronDown, IChevronUp, IClose, ICommentF, ICompress, IExpand, IList, ILockF, IPauseF, IPlayF, ISearch, ISettings, IVol, IVolMute } from "../icons";
+import { IMore, IHeart, IHeartF, IPip, IBack, IBoltF, IChevR, IChevronDown, IChevronUp, IClose, ICommentF, ICompress, IDownload, IExpand, IList, ILockF, IPauseF, IPlayF, ISearch, ISettings, IVol, IVolMute } from "../icons";
 
 export type PlayerPanel = "detail" | "episodes" | "comments" | "playback";
 type SurfacePanel = PlayerPanel | "more";
@@ -25,6 +25,10 @@ export interface FeedPresentation {
   onBack?: () => void; onNext?: () => void; onPrevious?: () => void; onNextEpisode?: () => void; onPreviousEpisode?: () => void;
   queueIndex?: number; total?: number;
   previousPreview?: { title: string; poster?: string }; nextPreview?: { title: string; poster?: string };
+  onCacheEpisode?: () => void | Promise<void>;
+  onOpenDownloads?: () => void;
+  cacheDisabledReason?: string;
+  cacheBusy?: boolean;
 }
 export interface FeedProps extends FeedPresentation {
   media: PreparedMedia | null; position: number; active?: boolean; preparing?: boolean; error?: string; onRetry?: () => void;
@@ -36,7 +40,8 @@ export interface FeedProps extends FeedPresentation {
  * Plugin adapters own metadata, sessions and persistence; this component owns presentation. */
 export default function Feed({media, position, active=true, preparing=false, error="", onRetry, onPosition, onFailure, onPlaying, onStopped, onEnded, onBuffer, onWaiting,
  title="", author="", description="", score, poster:posterUrl, episodeLabel="", qualityLabel, episodeCount=0, favorite=false, onFavorite,
- playIntent=0, mode="full", onOpenDetail, panels={}, social, onPanelChange, onBack, onNext, onPrevious, onNextEpisode, onPreviousEpisode, queueIndex=0, total=1, previousPreview, nextPreview}: FeedProps) {
+ playIntent=0, mode="full", onOpenDetail, panels={}, social, onPanelChange, onBack, onNext, onPrevious, onNextEpisode, onPreviousEpisode, queueIndex=0, total=1, previousPreview, nextPreview,
+ onCacheEpisode, onOpenDownloads, cacheDisabledReason, cacheBusy}: FeedProps) {
   const store=useStore(), {muted,setMuted,volume,setVolume}=store;
   const activeRef = useRef(active); activeRef.current = active;
   const isDesktop=!isMobile, preview=mode==="preview";
@@ -240,6 +245,8 @@ export default function Feed({media, position, active=true, preparing=false, err
         {onFavorite && <button onClick={onFavorite} aria-label={favorite?"取消本地收藏":"本地收藏"} aria-pressed={favorite}>{favorite ? <IHeartF size={22}/> : <IHeart size={22}/>}收藏</button>}
         {panels.playback && <button onClick={()=>setPanel("playback")}><ISettings size={22}/>画质与线路</button>}
         {panels.comments && <button onClick={()=>setPanel("comments")}><ICommentF size={22}/>评论</button>}
+        {onCacheEpisode && <button type="button" disabled={cacheBusy || !!cacheDisabledReason} aria-disabled={cacheBusy || !!cacheDisabledReason} title={cacheDisabledReason || "将当前分集缓存到离线"} onClick={()=>{if(cacheBusy||cacheDisabledReason)return;setPanel(null);void onCacheEpisode();}}><IDownload size={22}/>缓存本集{cacheDisabledReason && <small>{cacheDisabledReason}</small>}</button>}
+        {onOpenDownloads && <button type="button" onClick={()=>{setPanel(null);onOpenDownloads();}}><IDownload size={22}/>缓存管理</button>}
       </div>
       <label>播放速度<select aria-label="播放速度" value={rate} onChange={e=>setRate(Number(e.target.value))}>{[.5,.75,1,1.25,1.5,2].map(v=><option key={v} value={v}>{v}×{v===1?" · 正常":""}</option>)}</select></label>
       <label>音量<input aria-label="音量" type="range" min="0" max="1" step=".01" value={muted?0:volume} onChange={e=>{setMuted(false);setVolume(Number(e.target.value));}}/></label>
