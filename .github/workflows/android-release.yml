@@ -88,11 +88,6 @@ jobs:
           workspaces: src-tauri -> target
           key: android-private
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm tauri android init --ci
-      - run: node scripts/sync-android-network.mjs
-      - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
-
       - name: 确认签名 Secrets 已配置（不输出值）
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
@@ -107,6 +102,11 @@ jobs:
           done
           [ "$miss" -eq 0 ] || exit 1
           echo "签名 Secrets 四项均已配置（GitHub 不允许回读值，此处仅检测非空）。"
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri android init --ci
+      - run: node scripts/sync-android-network.mjs
+      - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
 
       - name: 签名并校验 APK
         env:

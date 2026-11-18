@@ -67,13 +67,15 @@ impl DownloadManager {
         headers: HashMap<String, String>,
         kind: Option<DownloadKind>,
     ) -> Result<DownloadTask> {
-        let mut tasks = self.inner.tasks.lock().unwrap();
-        if tasks.iter().any(|t| {
-            t.source_url == source_url
-                && t.state != DownloadState::Cancelled
-                && t.state != DownloadState::Failed
-        }) {
-            return Err(PluginError::invalid("相同地址已有进行中的下载任务"));
+        {
+            let tasks = self.inner.tasks.lock().unwrap();
+            if tasks.iter().any(|t| {
+                t.source_url == source_url
+                    && t.state != DownloadState::Cancelled
+                    && t.state != DownloadState::Failed
+            }) {
+                return Err(PluginError::invalid("相同地址已有进行中的下载任务"));
+            }
         }
         let kind = match kind {
             Some(k) => k,
@@ -82,9 +84,11 @@ impl DownloadManager {
         let id = Uuid::new_v4().to_string();
         let ts = now();
         let task = DownloadTask::new(id.clone(), title, episode_label, source_url, kind, headers, ts);
-        tasks.push(task.clone());
-        self.inner.store.save(&tasks)?;
-        drop(tasks);
+        {
+            let mut tasks = self.inner.tasks.lock().unwrap();
+            tasks.push(task.clone());
+            self.inner.store.save(&tasks)?;
+        }
         self.kick(id).await;
         Ok(task)
     }
