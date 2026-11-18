@@ -32,7 +32,7 @@ export interface FeedPresentation {
 }
 export interface FeedProps extends FeedPresentation {
   media: PreparedMedia | null; position: number; active?: boolean; preparing?: boolean; error?: string; onRetry?: () => void;
-  onPosition: (t: number, duration?: number) => void; onFailure: () => void;
+  onPosition: (t: number, duration?: number) => void; onFailure?: (detail?: string) => void;
   onPlaying?: () => void; onStopped?: () => void; onEnded?: () => void;
   onBuffer?: (seconds: number) => void; onWaiting?: () => void;
 }
@@ -605,7 +605,7 @@ export default function Feed({media, position, active=true, preparing=false, err
                       onWaiting={() => { setPhase('loading'); onWaiting?.(); }}
                       onEnded={onEnded} onBuffered={setBuffered}
                       onBuffer={onBuffer}
-                      onError={() => { setErr("播放失败"); onFailure(); }}
+                      onError={detail => { setErr(detail || "播放失败"); onFailure?.(detail); }}
                     />
                   </div>
 

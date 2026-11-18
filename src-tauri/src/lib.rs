@@ -70,7 +70,8 @@ pub fn run() {
             commands::app_update_install,
             commands::app_update_permissions,
             commands::app_update_open_install_permission,
-            commands::app_update_download_apk
+            commands::app_update_download_apk,
+            commands::app_update_discard_downloads
         ])
         .run(tauri::generate_context!())
         .expect("error while running HGhub");

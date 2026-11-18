@@ -10,8 +10,20 @@ const manifest = join(main, "AndroidManifest.xml");
 if (existsSync(manifest)) {
   const java = join(main, "java/com/hghub/player");
   mkdirSync(java, { recursive: true });
-  for (const file of ["OrientationPlugin.kt", "AppUpdatePlugin.kt", "AppUpdateIntents.kt"]) {
+  for (const file of [
+    "OrientationPlugin.kt",
+    "AppUpdatePlugin.kt",
+    "AppUpdateIntents.kt",
+    "AppUpdateInvokeArgs.kt",
+    "AppUpdateSigningPolicy.kt",
+  ]) {
     copyFileSync(join(androidSrc, file), join(java, file));
+  }
+  const testSrc = join(androidSrc, "AppUpdateArgsDeserTest.kt");
+  if (existsSync(testSrc)) {
+    const testDest = join(root, "src-tauri/gen/android/app/src/test/java/com/hghub/player");
+    mkdirSync(testDest, { recursive: true });
+    copyFileSync(testSrc, join(testDest, "AppUpdateArgsDeserTest.kt"));
   }
   mkdirSync(join(main, "res/xml"), { recursive: true });
   copyFileSync(join(androidSrc, "network_security_config.xml"), join(main, "res/xml/network_security_config.xml"));
@@ -62,6 +74,24 @@ if (existsSync(manifest)) {
     props = props.replace(/^tauri\.android\.versionName=.*$/m, `tauri.android.versionName=${pkg.version}`);
     props = props.replace(/^tauri\.android\.versionCode=.*$/m, `tauri.android.versionCode=${code}`);
     writeFileSync(propsPath, props);
+  }
+  const buildGradle = join(root, "src-tauri/gen/android/app/build.gradle.kts");
+  if (existsSync(buildGradle)) {
+    let gradle = readFileSync(buildGradle, "utf8");
+    if (!gradle.includes('testImplementation(project(":tauri-android"))')) {
+      gradle = gradle.replace(
+        'testImplementation("junit:junit:4.13.2")',
+        'testImplementation("junit:junit:4.13.2")\n    testImplementation(project(":tauri-android"))',
+      );
+    }
+    if (!gradle.includes("jackson-databind:2.15.3")) {
+      gradle = gradle.replace(
+        /testImplementation\("junit:junit:4\.13\.2"\)/,
+        match =>
+          `${match}\n    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")`,
+      );
+    }
+    writeFileSync(buildGradle, gradle);
   }
   console.log("[android] 已同步网络配置、应用更新插件、版本号与安装权限");
 }

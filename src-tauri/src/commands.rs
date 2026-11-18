@@ -1,6 +1,19 @@
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
+
+fn app_update_downloads_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("updates"))
+}
+
+fn is_safe_update_filename(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && name.ends_with(".apk")
+}
 
 #[cfg(target_os = "android")]
 pub struct OrientationPlugin(pub tauri::plugin::PluginHandle<tauri::Wry>);
@@ -140,7 +153,7 @@ pub async fn app_update_download_apk(
     expected_sha256: Option<String>,
 ) -> Result<String, String> {
     use sha2::{Digest, Sha256};
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("updates");
+    let dir = app_update_downloads_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dest = dir.join(file_name.replace('/', "_"));
     let client = reqwest::Client::builder()
@@ -179,6 +192,35 @@ pub async fn app_update_download_apk(
     }
     std::fs::write(&dest, &bytes).map_err(|e| format!("无法写入安装包：{e}"))?;
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// 删除 updates 目录内 APK（保留 keep 路径），用于换版本候选时清理陈旧 pending。
+#[tauri::command]
+pub fn app_update_discard_downloads(app: tauri::AppHandle, keep: Option<String>) -> Result<u32, String> {
+    let dir = app_update_downloads_dir(&app)?;
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let keep_path = keep.as_ref().map(PathBuf::from);
+    let mut removed = 0u32;
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(ref k) = keep_path {
+            if path == *k {
+                continue;
+            }
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if is_safe_update_filename(&name) {
+            std::fs::remove_file(&path).map_err(|e| format!("无法删除陈旧安装包 {name}：{e}"))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 #[tauri::command]

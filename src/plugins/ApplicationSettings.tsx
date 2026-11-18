@@ -6,7 +6,16 @@ import { Toggle } from "../components/ui";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { checkAppUpdate, type AppRelease } from "../appUpdates";
-import { readPendingUpdate, savePendingUpdate, stageLabel, type AppUpdateStage } from "../appUpdateInstall";
+import {
+  readPendingUpdate,
+  reconcilePendingWithCandidate,
+  releaseSnapshot,
+  savePendingUpdate,
+  stageLabel,
+  discardStaleDownloads,
+  type AppUpdateStage,
+  type PersistedAppUpdate,
+} from "../appUpdateInstall";
 import { assertApkReadyForUpdate } from "../appUpdateValidate";
 import { useStore } from "../store";
 import { APP_VERSION, platform } from "../environment";
@@ -77,32 +86,47 @@ function AppUpdateSetting() {
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => { active.current?.abort(); active.current = null; }, []);
   useEffect(() => {
-    const pending = readPendingUpdate();
-    if (pending?.localPath) {
-      setPendingPath(pending.localPath);
-      setMessage(`已下载 ${pending.release.tag}，可继续打开系统安装程序`);
-    }
+    let live = true;
+    void (async () => {
+      const pending = readPendingUpdate();
+      if (!pending?.localPath) return;
+      try {
+        await assertApkReadyForUpdate(pending.localPath, { tag: pending.tag }, APP_VERSION);
+        if (!live) return;
+        setPendingPath(pending.localPath);
+        setMessage(`已下载 ${pending.tag}，可继续打开系统安装程序`);
+      } catch {
+        await discardStaleDownloads(null);
+        savePendingUpdate(null);
+        if (live) setPendingPath(null);
+      }
+    })();
     const onVis = () => {
       if (document.visibilityState !== "visible" || platform !== "android") return;
+      const p = readPendingUpdate();
       void invoke<boolean>("app_update_permissions").then(allowed => {
-        if (allowed && pending?.localPath && !busy) {
-          setMessage(`已允许安装权限 · 可点「继续安装 ${pending.release.tag}」`);
+        if (allowed && p?.localPath && !busy) {
+          setMessage(`已允许安装权限 · 可点「继续安装 ${p.tag}」`);
         }
       }).catch(() => {});
     };
     document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    return () => { live = false; document.removeEventListener("visibilitychange", onVis); };
   }, [busy]);
   const check = async () => {
     if (active.current) return;
     const controller = new AbortController();
     active.current = controller;
-    setChecking(true); setError(""); setRelease(null); setStage("idle"); setMessage("正在检查更新…");
+    setChecking(true); setError(""); setRelease(null); setStage("checking"); setMessage(stageLabel("checking"));
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const result = await checkAppUpdate(APP_VERSION, controller.signal);
       if (active.current !== controller) return;
+      await reconcilePendingWithCandidate(result, { clearOnNoUpdate: true });
+      if (!readPendingUpdate()) { setPendingPath(null); }
       setRelease(result);
+      if (result?.available) setStage("candidate");
+      else setStage("idle");
       setMessage(result ? result.available ? `发现新版本 ${result.tag}` : `暂无更新 · 最新发布 ${result.tag}` : "暂无正式发布版本");
     } catch (e) {
       if (active.current !== controller) return;
@@ -127,7 +151,7 @@ function AppUpdateSetting() {
     try {
       const allowed = await invoke<boolean>("app_update_permissions");
       if (!allowed) {
-        savePendingUpdate({ release: target, savedAt: Date.now() });
+        savePendingUpdate({ ...releaseSnapshot(target), savedAt: Date.now() });
         setStage("need_permission");
         setMessage(stageLabel("need_permission"));
         await invoke("app_update_open_install_permission");
@@ -135,7 +159,8 @@ function AppUpdateSetting() {
         return;
       }
       let path = reusePath;
-      if (!path) {
+      if (!path || reusePath && target.tag !== readPendingUpdate()?.tag) {
+        await discardStaleDownloads(null);
         setStage("downloading");
         setMessage(stageLabel("downloading"));
         path = await invoke<string>("app_update_download_apk", {
@@ -143,17 +168,24 @@ function AppUpdateSetting() {
           fileName: target.apkName || "HGhub-update.apk",
           expectedSha256: target.apkSha256 || null,
         });
-        setStage("verifying");
-        setMessage(`${stageLabel("verifying")}（${path.split(/[/\\]/).pop()}）`);
       }
       setStage("verifying");
-      setMessage("正在校验安装包身份与版本…");
+      setMessage("正在校验安装包身份、签名与版本…");
       const meta = await assertApkReadyForUpdate(path, target, APP_VERSION);
+      setStage("ready");
       setMessage(
         `安装包 OK：versionCode ${meta.versionCode} · ${meta.versionName} · ${((meta.apkBytes ?? 0) / (1024 * 1024)).toFixed(2)} MiB`,
       );
       setPendingPath(path);
-      savePendingUpdate({ release: target, localPath: path, savedAt: Date.now() });
+      const pending: PersistedAppUpdate = {
+        ...releaseSnapshot(target),
+        localPath: path,
+        inspectedVersionCode: meta.versionCode,
+        inspectedVersionName: meta.versionName,
+        savedAt: Date.now(),
+      };
+      savePendingUpdate(pending);
+      await discardStaleDownloads(path);
       await launchInstaller(path);
     } catch (e) {
       setStage("failed");
@@ -166,7 +198,18 @@ function AppUpdateSetting() {
   const continuePending = async () => {
     const pending = readPendingUpdate();
     if (!pending?.localPath) { setError("没有待安装的已下载包"); return; }
-    const target = release ?? ({ ...pending.release, available: true } as AppRelease);
+    if (release && release.tag !== pending.tag) {
+      setError(`待安装包为 ${pending.tag}，与当前候选 ${release.tag} 不一致；请重新检查更新`);
+      return;
+    }
+    const target: AppRelease = release ?? {
+      tag: pending.tag,
+      url: pending.url,
+      available: true,
+      apkUrl: pending.apkUrl,
+      apkSha256: pending.apkSha256,
+      apkName: pending.apkName,
+    };
     await installAndroid(target, pending.localPath);
   };
   const open = async () => {
@@ -185,7 +228,7 @@ function AppUpdateSetting() {
         {release?.available && <button className="pressable disabled:opacity-50" disabled={busy || checking} onClick={() => void open()}>{busy ? (stageLabel(stage) || "正在处理…") : platform === "android" && release.apkUrl ? "下载并安装" : "前往 Release"}</button>}
         {platform === "android" && (pending?.localPath || pendingPath) && (
           <button className="pressable disabled:opacity-50" disabled={busy || checking} onClick={() => void continuePending()}>
-            {busy ? "正在打开安装程序…" : `继续安装 ${pending?.release.tag || release?.tag || "待安装包"}`}
+            {busy ? "正在打开安装程序…" : `继续安装 ${pending?.tag || release?.tag || "待安装包"}`}
           </button>
         )}
         <button className="pressable disabled:opacity-50" disabled={checking || busy} onClick={() => void check()}>{checking ? "检查中…" : release ? "重新检查" : "检查更新"}</button>

@@ -113,4 +113,7 @@ for (const key of ['csp', 'devCsp']) {
   const connect = config.app.security[key].split(';').find(d => d.trim().startsWith('connect-src '));
   assert(connect.split(/\s+/).includes('https://api.github.com'), `${key} permits the release API`);
 }
-console.log(`App update checks passed: 4-part swpu tags, same-version, prerelease, list fallback, errors`);
+const pending = readFileSync("src/appUpdateInstall.ts", "utf8");
+assert.match(pending, /reconcilePendingWithCandidate/);
+assert.match(pending, /app_update_discard_downloads/);
+console.log(`App update checks passed: 4-part swpu tags, same-version, prerelease, list fallback, errors, state machine`);

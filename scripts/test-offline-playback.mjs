@@ -12,6 +12,11 @@ assert.equal(offlinePlaybackFormat("hlsMpegTs"), "hls");
 assert.equal(offlinePlaybackFormat("hlsFmp4"), "progressive");
 assert.equal(offlinePlaybackFormat("progressiveMp4"), "progressive");
 
+const offline = readFileSync(join(root, "src/plugins/OfflinePlaybackPage.tsx"), "utf8");
+assert.match(offline, /PluginPlayer/);
+assert.match(offline, /onNextEpisode/);
+assert.match(offline, /getOfflineProgress/);
+
 const cache = readFileSync(join(root, "src/plugins/LibraryCachePanel.tsx"), "utf8");
 assert.doesNotMatch(cache, /window\.location/);
 assert.match(cache, /kind:\s*"offlinePlay"/);

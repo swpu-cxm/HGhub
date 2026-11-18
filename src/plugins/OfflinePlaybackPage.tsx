@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { IBack } from "../icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { useStore } from "../store";
-import VideoSurface, { type VideoHandle } from "../components/VideoSurface";
+import PluginPlayer from "./PluginPlayer";
 import { buildOfflinePreparedMedia, type OfflineDownloadKind } from "./offlinePlayback";
 import type { PreparedMedia } from "./client";
 import { Notice } from "./BrowsePages";
+import {
+  type DownloadTask,
+  formatEpisodeLabel,
+  groupDownloadTasks,
+  groupKey,
+} from "./libraryCache";
+import { getOfflineProgress, setOfflineProgress } from "./offlineProgress";
+import { useHost } from "./HostContext";
 
 type Props = {
   downloadId: string;
@@ -17,12 +24,82 @@ type Props = {
 
 export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, kind, onBack }: Props) {
   const app = useStore();
-  const videoRef = useRef<VideoHandle>(null);
+  const host = useHost();
   const [media, setMedia] = useState<PreparedMedia | null>(null);
   const [error, setError] = useState("");
   const [diag, setDiag] = useState("");
-  const [phase, setPhase] = useState<"loading" | "playing" | "paused">("loading");
-  const position = useRef(0);
+  const [preparing, setPreparing] = useState(true);
+  const [tasks, setTasks] = useState<DownloadTask[]>([]);
+  const position = useRef(getOfflineProgress(downloadId)?.positionSec ?? 0);
+  const lastSave = useRef(0);
+  const epoch = useRef(0);
+
+  const task = useMemo(() => tasks.find(t => t.id === downloadId), [tasks, downloadId]);
+  const groupTasks = useMemo(() => {
+    if (!task) return [];
+    const key = groupKey(task);
+    const group = groupDownloadTasks(tasks).find(g => g.key === key);
+    return (group?.tasks ?? []).filter(t => t.state === "completed");
+  }, [tasks, task]);
+
+  const episodeIndex = groupTasks.findIndex(t => t.id === downloadId);
+  const prevTask = episodeIndex > 0 ? groupTasks[episodeIndex - 1] : undefined;
+  const nextTask = episodeIndex >= 0 && episodeIndex < groupTasks.length - 1 ? groupTasks[episodeIndex + 1] : undefined;
+
+  const openTask = useCallback(
+    (t: DownloadTask) => {
+      app.replace({
+        kind: "offlinePlay",
+        downloadId: t.id,
+        title: t.title,
+        episodeLabel: formatEpisodeLabel(t),
+        mediaKind: t.kind,
+      });
+    },
+    [app],
+  );
+
+  const loadTasks = useCallback(async () => {
+    const list = await invoke<DownloadTask[]>("download_manage", { action: "list", params: {} });
+    setTasks(list);
+    return list;
+  }, []);
+
+  const prepare = useCallback(async () => {
+    const n = ++epoch.current;
+    setPreparing(true);
+    setError("");
+    setDiag("");
+    try {
+      await loadTasks();
+      const prep = await invoke<{
+        path: string;
+        packageValid?: boolean;
+        validateError?: string;
+        segmentCount?: number;
+        aes128KeyPresent?: boolean;
+      }>("download_manage", { action: "preparePlayback", params: { id: downloadId } });
+      const bits = [
+        prep.packageValid === false && prep.validateError ? `校验: ${prep.validateError}` : null,
+        prep.segmentCount != null ? `分片 ${prep.segmentCount}` : null,
+        prep.aes128KeyPresent != null ? `AES-128: ${prep.aes128KeyPresent ? "ok" : "缺密钥"}` : null,
+      ].filter(Boolean);
+      if (bits.length) setDiag(bits.join(" · "));
+      if (prep.packageValid === false) {
+        throw new Error(prep.validateError || "离线包校验失败");
+      }
+      if (epoch.current !== n) return;
+      const saved = getOfflineProgress(downloadId);
+      if (saved?.positionSec) position.current = saved.positionSec;
+      setMedia(buildOfflinePreparedMedia(downloadId, prep.path, kind));
+    } catch (e) {
+      if (epoch.current !== n) return;
+      setMedia(null);
+      setError(e instanceof Error ? e.message : "无法准备离线播放");
+    } finally {
+      if (epoch.current === n) setPreparing(false);
+    }
+  }, [downloadId, kind, loadTasks]);
 
   useEffect(() => {
     app.setWatching(true);
@@ -30,88 +107,91 @@ export default function OfflinePlaybackPage({ downloadId, title, episodeLabel, k
   }, [app]);
 
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      setError("");
-      setDiag("");
-      try {
-        const prep = await invoke<{
-          path: string;
-          packageValid?: boolean;
-          validateError?: string;
-          segmentCount?: number;
-          aes128KeyPresent?: boolean;
-        }>("download_manage", { action: "preparePlayback", params: { id: downloadId } });
-        const bits = [
-          prep.packageValid === false && prep.validateError ? `校验: ${prep.validateError}` : null,
-          prep.segmentCount != null ? `分片 ${prep.segmentCount}` : null,
-          prep.aes128KeyPresent != null ? `AES-128: ${prep.aes128KeyPresent ? "ok" : "缺密钥"}` : null,
-        ].filter(Boolean);
-        if (bits.length) setDiag(bits.join(" · "));
-        if (prep.packageValid === false) {
-          throw new Error(prep.validateError || "离线包校验失败");
-        }
-        if (!live) return;
-        setMedia(buildOfflinePreparedMedia(downloadId, prep.path, kind));
-      } catch (e) {
-        if (live) setError(e instanceof Error ? e.message : "无法准备离线播放");
-      }
-    })();
-    return () => { live = false; };
-  }, [downloadId, kind]);
+    void prepare();
+    return () => { epoch.current++; };
+  }, [prepare]);
+
+  const episodePanel = groupTasks.length > 1 ? (
+    <ul className="hpp-offline-episodes">
+      {groupTasks.map(t => (
+        <li key={t.id}>
+          <button
+            type="button"
+            className={t.id === downloadId ? "is-current" : undefined}
+            onClick={() => openTask(t)}
+          >
+            {formatEpisodeLabel(t)}
+            {t.id === downloadId ? " · 播放中" : ""}
+          </button>
+        </li>
+      ))}
+    </ul>
+  ) : undefined;
+
+  const playbackError = (detail?: string) =>
+    kind === "hlsMpegTs"
+      ? `离线 HLS 播放失败${detail ? ` [${detail}]` : ""}。引擎: Hls.js/MSE · IPC 本地加载（非 asset XHR）。`
+      : `离线视频无法播放${detail ? ` [${detail}]` : ""}`;
 
   return (
-    <div className="absolute inset-0 z-40 bg-black flex flex-col">
-      <header className="flex items-center gap-3 px-4 py-3 text-white" style={{ paddingTop: "max(12px, var(--sat, 0px))" }}>
-        <button type="button" aria-label="返回缓存管理" onClick={onBack}><IBack size={20}/></button>
-        <div className="min-w-0 flex-1">
-          <strong className="block truncate text-sm">{title}</strong>
-          {episodeLabel && <span className="text-xs text-white/70">{episodeLabel}</span>}
+    <div className="absolute inset-0 z-40 bg-black">
+      {diag && !error && (
+        <p className="absolute top-0 left-0 right-0 z-[70] px-4 py-1 text-xs text-white/50 pointer-events-none" style={{ paddingTop: "max(4px, var(--sat, 0px))" }}>
+          {diag}
+        </p>
+      )}
+      {error && !media ? (
+        <div className="p-4 pt-16">
+          <Notice error={error}/>
+          <button type="button" className="mt-4 text-primary" onClick={() => void prepare()}>重试</button>
         </div>
-      </header>
-      <Notice error={error}/>
-      {diag && !error && <p className="px-4 text-xs text-white/50">{diag}</p>}
-      <div className="relative flex-1 min-h-0 bg-black">
-        {media && !error ? (
-          <>
-            <VideoSurface
-              ref={videoRef}
-              media={media}
-              position={position.current}
-              active
-              autoPlay
-              muted={app.muted}
-              volume={app.volume}
-              rate={1}
-              fit="contain"
-              scale={1}
-              panX={0}
-              panY={0}
-              isGesturing={false}
-              onClick={() => videoRef.current?.toggle()}
-              onTime={t => { position.current = t; }}
-              onDuration={() => {}}
-              onSize={() => {}}
-              onPlaying={() => { setPhase("playing"); setError(""); }}
-              onPause={() => setPhase("paused")}
-              onWaiting={() => setPhase("loading")}
-              onBuffered={() => {}}
-              onError={detail => setError(
-                kind === "hlsMpegTs"
-                  ? `离线 HLS 播放失败${detail ? ` [${detail}]` : ""}。引擎: Hls.js/MSE · IPC 本地加载（非 asset XHR）。`
-                  : `离线视频无法播放${detail ? ` [${detail}]` : ""}`,
-              )}
-            />
-            {phase === "loading" && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-9 h-9 spinner" role="status" aria-label="正在加载离线视频"/>
-              </div>
-            )}
-          </>
-        ) : !error ? (
-          <p className="text-center text-white/60 text-sm mt-12">正在打开离线文件…</p>
-        ) : null}
-      </div>
+      ) : (
+        <PluginPlayer
+          mode="full"
+          media={media}
+          preparing={preparing}
+          active={!preparing && !!media}
+          position={position.current}
+          title={title}
+          episodeLabel={episodeLabel || (task ? formatEpisodeLabel(task) : "")}
+          episodeCount={task?.episodeCount ?? groupTasks.length}
+          poster={task?.coverLocalPath ? convertFileSrc(task.coverLocalPath) : undefined}
+          panels={{
+            episodes: episodePanel,
+            playback: (
+              <p className="text-xs text-mut px-1">
+                离线播放：换源、评论与在线解析不可用；倍速、手势、全屏与在线播放器一致。
+              </p>
+            ),
+          }}
+          cacheDisabledReason="离线播放不支持再缓存"
+          onOpenDownloads={onBack}
+          onBack={onBack}
+          onNextEpisode={nextTask ? () => openTask(nextTask) : undefined}
+          onPreviousEpisode={prevTask ? () => openTask(prevTask) : undefined}
+          nextPreview={nextTask ? { title: formatEpisodeLabel(nextTask) } : undefined}
+          previousPreview={prevTask ? { title: formatEpisodeLabel(prevTask) } : undefined}
+          queueIndex={episodeIndex >= 0 ? episodeIndex : 0}
+          total={Math.max(groupTasks.length, 1)}
+          error={error}
+          onRetry={() => void prepare()}
+          onPosition={(t, duration) => {
+            position.current = t;
+            if (Date.now() - lastSave.current > 4000) {
+              lastSave.current = Date.now();
+              setOfflineProgress(downloadId, t, duration);
+            }
+          }}
+          onPlaying={() => setError("")}
+          onStopped={() => setOfflineProgress(downloadId, position.current)}
+          onEnded={() => {
+            setOfflineProgress(downloadId, position.current);
+            if (host.prefs.autoNext && nextTask) openTask(nextTask);
+          }}
+          onFailure={detail => setError(playbackError(detail))}
+          onWaiting={() => {}}
+        />
+      )}
     </div>
   );
 }
