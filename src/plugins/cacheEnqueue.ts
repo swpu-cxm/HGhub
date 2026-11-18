@@ -60,6 +60,10 @@ export type EnqueueEpisodeInput = {
   playlistId?: string;
   selection: PlaybackSelection;
   poster?: string;
+  /** 批量模式下元数据已在批次开头写入 */
+  skipWorkMeta?: boolean;
+  /** 批量模式下封面只持久化一次 */
+  skipCover?: boolean;
 };
 
 export async function enqueueEpisodeCache(input: EnqueueEpisodeInput): Promise<{ id: string; created: boolean }> {
@@ -85,7 +89,9 @@ export async function enqueueEpisodeCache(input: EnqueueEpisodeInput): Promise<{
   if (pick.format && pick.format !== "progressive" && pick.format !== "hls") {
     throw new Error("该播放流格式暂不支持离线缓存");
   }
-  await upsertWorkMetaFromDetail(input.pluginId, input.mediaId, input.detail, input.pluginName);
+  if (!input.skipWorkMeta) {
+    await upsertWorkMetaFromDetail(input.pluginId, input.mediaId, input.detail, input.pluginName);
+  }
   const created = await invoke<{ id: string }>("download_manage", {
     action: "enqueue",
     params: {
@@ -102,26 +108,45 @@ export async function enqueueEpisodeCache(input: EnqueueEpisodeInput): Promise<{
       coverUrl: input.poster?.startsWith("http") ? input.poster : undefined,
     },
   });
-  if (input.poster) {
-    await persistTaskCover(created.id, input.poster);
+  if (input.poster && !input.skipCover) {
+    try {
+      await persistTaskCover(created.id, input.poster);
+    } catch {
+      /* 封面失败不阻断下载 */
+    }
   }
   return { id: created.id, created: true };
 }
 
+export type BatchEnqueueInput = Omit<EnqueueEpisodeInput, "ep" | "skipWorkMeta" | "skipCover">;
+
 export async function enqueueEpisodeBatch(
   episodes: Episode[],
-  input: Omit<EnqueueEpisodeInput, "ep">,
+  input: BatchEnqueueInput,
 ): Promise<{ enqueued: number; skipped: number; errors: string[] }> {
   let enqueued = 0;
   let skipped = 0;
   const errors: string[] = [];
+  try {
+    await upsertWorkMetaFromDetail(input.pluginId, input.mediaId, input.detail, input.pluginName);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    errors.push(`作品元数据: ${message}`);
+  }
+  let coverDone = false;
   for (const ep of episodes) {
     if (ep.locked) {
       skipped++;
       continue;
     }
     try {
-      await enqueueEpisodeCache({ ...input, ep });
+      await enqueueEpisodeCache({
+        ...input,
+        ep,
+        skipWorkMeta: true,
+        skipCover: coverDone,
+      });
+      coverDone = true;
       enqueued++;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

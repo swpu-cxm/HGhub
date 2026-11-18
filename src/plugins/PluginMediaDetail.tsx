@@ -19,7 +19,7 @@ import ResolverChooser from "./ResolverChooser";
 import { useStore } from "../store";
 import { invoke } from "@tauri-apps/api/core";
 import { fetchDownloadCatalog } from "./cacheApi";
-import { enqueueEpisodeBatch, enqueueEpisodeCache } from "./cacheEnqueue";
+import { enqueueEpisodeBatch, enqueueEpisodeCache, type BatchEnqueueInput } from "./cacheEnqueue";
 import CacheBatchPanel from "./CacheBatchPanel";
 import type { DownloadTask } from "./libraryCache";
 import { registerBackHandler } from "../back";
@@ -386,8 +386,8 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
         detail,
         pluginName: plugin.meta.name,
         ep,
-        playlistId: listId,
-        selection: selection.current,
+        playlistId: listId || detail.playlists[0]?.id,
+        selection: { ...selection.current },
         poster,
       });
       const message = `「${detail.title}」${ep.label || `第 ${ep.index} 集`} 已加入离线缓存`;
@@ -400,22 +400,17 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
     } finally { setBusy(false); }
   };
 
-  const batchEnqueue = async (eps: Episode[]) => {
-    if (!detail) throw new Error("缺少作品信息");
-    setBusy(true);
-    try {
-      return await enqueueEpisodeBatch(eps, {
-        pluginId: plugin.meta.id,
-        mediaId,
-        detail,
-        pluginName: plugin.meta.name,
-        playlistId: playlist || current.current?.playlistId,
-        selection: selection.current,
-        poster,
-      });
-    } finally {
-      setBusy(false);
-    }
+  const batchEnqueueInput = (): BatchEnqueueInput | null => {
+    if (!detail) return null;
+    return {
+      pluginId: plugin.meta.id,
+      mediaId,
+      detail,
+      pluginName: plugin.meta.name,
+      playlistId: playlist || current.current?.playlistId || detail.playlists[0]?.id,
+      selection: { ...selection.current },
+      poster,
+    };
   };
   const playbackPanel=<><Notice error={error}/><div className="hpp-playback-options" aria-label="播放选择">{choices && <>
     <PlaybackOptions stage="源" choices={choices.source} disabled={busy} onServer={serverId=>selectPlayback({serverId:serverId||undefined,streamIndex:0,resolverStreamIndex:0})} onStream={streamIndex=>selectPlayback({streamIndex,resolverStreamIndex:0})}/>
@@ -472,9 +467,10 @@ export default function PluginMediaDetail({ plugin, mediaId, onBack, manage, act
           tasks={cacheTasks}
           busy={busy}
           onEnqueueSelected={async eps => {
-            const r = await batchEnqueue(eps);
+            const input = batchEnqueueInput();
+            if (!input) throw new Error("缺少作品信息");
             app.openLibraryCacheWork(plugin.meta.id, mediaId);
-            return r;
+            return enqueueEpisodeBatch(eps, input);
           }}
         />
       ) : null}

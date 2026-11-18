@@ -116,27 +116,52 @@ impl DownloadManager {
         episode_count: Option<u32>,
         cover_url: Option<String>,
     ) -> Result<DownloadTask> {
-        {
+        let duplicate = {
             let tasks = self.inner.tasks.lock().unwrap();
-            if let (Some(plugin_id), Some(media_id), Some(episode_id)) =
+            let by_episode = if let (Some(plugin_id), Some(media_id), Some(episode_id)) =
                 (&plugin_id, &media_id, &episode_id)
             {
-                if let Some(existing) = tasks.iter().find(|t| {
+                tasks.iter().find(|t| {
                     t.plugin_id.as_deref() == Some(plugin_id.as_str())
                         && t.media_id.as_deref() == Some(media_id.as_str())
                         && t.episode_id.as_deref() == Some(episode_id.as_str())
                         && !matches!(t.state, DownloadState::Cancelled | DownloadState::Failed)
-                }) {
-                    return Ok(existing.clone());
-                }
-            }
-            if tasks.iter().any(|t| {
+                })
+                .map(|t| (t.clone(), t.state.clone()))
+            } else {
+                None
+            };
+            if by_episode.is_some() {
+                by_episode
+            } else if tasks.iter().any(|t| {
                 t.source_url == source_url
                     && t.state != DownloadState::Cancelled
                     && t.state != DownloadState::Failed
             }) {
                 return Err(PluginError::invalid("相同地址已有进行中的下载任务"));
+            } else {
+                None
             }
+        };
+        if let Some((existing, state)) = duplicate {
+            return match state {
+                DownloadState::Paused => {
+                    self.resume(&existing.id).await?;
+                    self.inner
+                        .tasks
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|t| t.id == existing.id)
+                        .cloned()
+                        .ok_or_else(|| PluginError::invalid("找不到下载任务"))
+                }
+                DownloadState::Queued | DownloadState::Running => {
+                    self.kick(existing.id.clone()).await;
+                    Ok(existing)
+                }
+                _ => Ok(existing),
+            };
         }
         let kind = match kind {
             Some(k) => k,

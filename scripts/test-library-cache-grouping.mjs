@@ -25,5 +25,9 @@ assert.match(panel, /fetchDownloadCatalog/);
 const detail = readFileSync(join(root, "src/plugins/PluginMediaDetail.tsx"), "utf8");
 assert.match(detail, /CacheBatchPanel/);
 assert.match(detail, /openLibraryCacheWork/);
+const enqueue = readFileSync(join(root, "src/plugins/cacheEnqueue.ts"), "utf8");
+assert.match(enqueue, /skipWorkMeta/);
+assert.match(enqueue, /enqueueEpisodeBatch/);
+assert.doesNotMatch(detail, /await batchEnqueue\(eps\)[\s\S]*openLibraryCacheWork/s);
 
 console.log("library cache grouping + UI wiring gate passed");
