@@ -68,7 +68,7 @@ export default function ApplicationSettings({ onBack }: { onBack: () => void }) 
 
 function AppUpdateSetting() {
   const [checking, setChecking] = useState(false), [opening, setOpening] = useState(false);
-  const [message, setMessage] = useState(`检查 ${UPDATE_GITHUB_OWNER}/${UPDATE_GITHUB_REPO} 正式 Release`), [error, setError] = useState("");
+  const [message, setMessage] = useState(`检查 ${UPDATE_GITHUB_OWNER}/${UPDATE_GITHUB_REPO} Releases`), [error, setError] = useState("");
   const [release, setRelease] = useState<AppRelease | null>(null);
   const active = useRef<AbortController | null>(null);
   useEffect(() => () => { active.current?.abort(); active.current = null; }, []);

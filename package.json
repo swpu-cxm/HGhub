@@ -1,7 +1,8 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "0.0.5-swpu-install-test",
+  "version": "0.0.5.2-swpu-install-test",
+  "androidVersionCode": 6,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {

@@ -41,5 +41,15 @@ if (existsSync(manifest)) {
     );
   }
   writeFileSync(manifest, xml);
-  console.log("[android] 已同步网络配置、应用更新插件与安装权限");
+  const propsPath = join(root, "src-tauri/gen/android/app/tauri.properties");
+  if (existsSync(propsPath)) {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const code = Number(pkg.androidVersionCode);
+    if (!Number.isInteger(code) || code < 1) throw new Error("package.json 缺少有效 androidVersionCode");
+    let props = readFileSync(propsPath, "utf8");
+    props = props.replace(/^tauri\.android\.versionName=.*$/m, `tauri.android.versionName=${pkg.version}`);
+    props = props.replace(/^tauri\.android\.versionCode=.*$/m, `tauri.android.versionCode=${code}`);
+    writeFileSync(propsPath, props);
+  }
+  console.log("[android] 已同步网络配置、应用更新插件、版本号与安装权限");
 }
