@@ -70,7 +70,12 @@ async fn resolve_playback_requires_request_id() {
     let info = manager.import_code(code.into(), None, false).await.unwrap();
     assert_eq!(info.status, "ready", "{:?}", info.error);
     let err = manager
-        .call(&info.meta.id, "search.search", json!({"query": "test"}), String::new())
+        .call(
+            &info.meta.id,
+            "media.resolvePlayback",
+            json!({"mediaId": "x", "playlistId": "p", "episodeId": "1"}),
+            String::new(),
+        )
         .await
         .unwrap_err();
     assert!(

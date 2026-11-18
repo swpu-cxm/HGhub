@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { pluginCommand } from "./client";
+import { detachedPluginCall } from "./pluginDetachedCall";
 import type { MediaDetail } from "./protocol";
 import type { Episode } from "./protocol";
 import type { PlaybackSelection } from "./playbackSelection";
@@ -67,23 +67,20 @@ export type EnqueueEpisodeInput = {
 };
 
 export async function enqueueEpisodeCache(input: EnqueueEpisodeInput): Promise<{ id: string; created: boolean }> {
-  const playback = await pluginCommand<{ streams: { url: string; format?: string; headers?: Record<string, string> }[] }>(
-    "call",
-    {
-      id: input.pluginId,
-      method: "media.resolvePlayback",
-      args: {
-        mediaId: input.mediaId,
-        playlistId: input.playlistId,
-        episodeId: input.ep.id,
-        serverId: input.selection.serverId,
-        streamIndex: input.selection.streamIndex,
-        resolverId: input.selection.resolverId,
-        resolverStreamIndex: input.selection.resolverStreamIndex,
-        resolverServers: input.selection.resolverServers,
-      },
+  const playback = await detachedPluginCall<{ streams: { url: string; format?: string; headers?: Record<string, string> }[] }>({
+    id: input.pluginId,
+    method: "media.resolvePlayback",
+    args: {
+      mediaId: input.mediaId,
+      playlistId: input.playlistId,
+      episodeId: input.ep.id,
+      serverId: input.selection.serverId,
+      streamIndex: input.selection.streamIndex,
+      resolverId: input.selection.resolverId,
+      resolverStreamIndex: input.selection.resolverStreamIndex,
+      resolverServers: input.selection.resolverServers,
     },
-  );
+  });
   const pick = playback.streams[input.selection.streamIndex] || playback.streams[0];
   if (!pick?.url) throw new Error("没有可缓存的播放地址");
   if (pick.format && pick.format !== "progressive" && pick.format !== "hls") {
