@@ -21,6 +21,38 @@ fn plugin_source() -> PathBuf {
     panic!("未找到黄果插件源文件；请设置 HGHUB_HUANGGUO_PLUGIN 或 clone swpu-cxm/hghub-plugins");
 }
 
+fn ffmpeg_offline_hls_decode(pkg_dir: &std::path::Path, seconds: u32) -> Result<(), String> {
+    let index = pkg_dir.join("index.m3u8");
+    let key = pkg_dir.join("aes128.key");
+    if !key.is_file() {
+        return Err("缺少 aes128.key".into());
+    }
+    let ok = std::process::Command::new("ffmpeg")
+        .current_dir(pkg_dir)
+        .args([
+            "-v",
+            "error",
+            "-allowed_extensions",
+            "ALL",
+            "-i",
+            index.file_name().unwrap().to_str().unwrap(),
+            "-t",
+            &seconds.to_string(),
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
+    if ok.status.success() {
+        return Ok(());
+    }
+    Err(String::from_utf8_lossy(&ok.stderr).trim().into())
+}
+
 fn headers_of(stream: &Value) -> HashMap<String, String> {
     let Some(obj) = stream.get("headers").and_then(Value::as_object) else {
         return HashMap::new();
@@ -202,12 +234,15 @@ async fn huangguo_qiongming_episode2_offline_cache() {
             assert!(ts_count > 0, "离线包应含 .ts 分片");
             eprintln!("离线包: {} 个 TS 分片, index 共 {} 字节", ts_count, index.len());
         }
-        eprintln!(
-            "黄果缓存验收通过（线路 {label}, {:.1}s, {} 字节）",
-            started.elapsed().as_secs_f32(),
-            done.bytes_done
-        );
-        return;
+            let pkg = out.parent().expect("pkg");
+            ffmpeg_offline_hls_decode(pkg, 8).expect("ffmpeg 无法解码离线 AES-128 HLS（含密钥与分片引用）");
+            ffmpeg_offline_hls_decode(pkg, 3).expect("ffmpeg 重试短采样失败");
+            eprintln!(
+                "黄果缓存验收通过（线路 {label}, {:.1}s, ffmpeg 解码 OK, {} 字节）",
+                started.elapsed().as_secs_f32(),
+                done.bytes_done
+            );
+            return;
     }
     panic!(
         "所有播放线路均无法离线缓存；详情:\n{}",

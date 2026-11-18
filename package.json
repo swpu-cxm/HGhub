@@ -1,8 +1,8 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "0.0.5.3-swpu-install-test",
-  "androidVersionCode": 7,
+  "version": "0.0.5.4-swpu-install-test",
+  "androidVersionCode": 8,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
@@ -24,7 +24,8 @@
     "android:build": "tauri android build",
     "test:app-updates": "node scripts/test-app-updates.mjs",
     "test:media-download": "node scripts/test-media-download-gate.mjs",
-    "test:huangguo-cache": "node scripts/test-huangguo-cache-integration.mjs"
+    "test:huangguo-cache": "node scripts/test-huangguo-cache-integration.mjs",
+    "test:offline-playback": "node scripts/test-offline-playback.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

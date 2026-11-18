@@ -5,5 +5,7 @@
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">127.0.0.1</domain>
         <domain includeSubdomains="false">localhost</domain>
+        <!-- Tauri convertFileSrc 本地资源（仅应用内 WebView 播放，非远程 HTTP）。 -->
+        <domain includeSubdomains="false">asset.localhost</domain>
     </domain-config>
 </network-security-config>

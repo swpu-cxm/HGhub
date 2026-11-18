@@ -53,7 +53,8 @@ export default forwardRef<VideoHandle, Props>(function VideoSurface(props, forwa
     playAttempt.current++;wantsPlay.current=latest.current.autoPlay!==false;
     const started=performance.now(); let firstFrame: number | undefined;
     const p=latest.current;
-    const activity=(playing:boolean)=>void pluginCommand("media.activity",{sessionId:p.media.sessionId,playing}).then(()=>{if(!playing)window.dispatchEvent(new Event("hpp.playback.idle"));}).catch(()=>{});
+    const offline=p.media.localFile||p.media.sessionId.startsWith("offline:");
+    const activity=(playing:boolean)=>{if(offline)return;void pluginCommand("media.activity",{sessionId:p.media.sessionId,playing}).then(()=>{if(!playing)window.dispatchEvent(new Event("hpp.playback.idle"));}).catch(()=>{});};
     const fail=()=>{if(!disposed&&!failed){failed=true;latest.current.onError();}};
     const metadata=()=>{if(p.position>0&&Number.isFinite(v.duration))v.currentTime=Math.min(p.position,Math.max(0,v.duration-.15));if(latest.current.active&&wantsPlay.current)play();};
     const playing=()=>{if(!disposed){activity(true);latest.current.onPlaying();}};
@@ -61,7 +62,8 @@ export default forwardRef<VideoHandle, Props>(function VideoSurface(props, forwa
     const visibility=()=>{if(document.hidden){resume=!v.paused;v.pause();hls.current?.stopLoad();}else if(resume){resume=false;if(latest.current.active){hls.current?.startLoad(v.currentTime);play();}}};
     v.muted=p.muted;v.volume=p.volume;v.playbackRate=p.rate;
     v.addEventListener("loadedmetadata",metadata);v.addEventListener("error",fail);v.addEventListener("playing",playing);v.addEventListener("pause",paused);document.addEventListener("visibilitychange",visibility);
-    if(p.media.format==="hls"&&hlsPlaybackPath(v)==="mse"){
+    const hlsPath=p.media.format==="hls"&&(p.media.localFile?"native":hlsPlaybackPath(v));
+    if(hlsPath==="mse"){
       const engine=new Hls({enableWorker:true,workerPath,autoStartLoad:p.active&&!document.hidden,startPosition:Math.max(0,p.position),backBufferLength:30,interstitialsController:undefined,contentSteeringController:undefined,enableInterstitialPlayback:false});
       hls.current=engine;engine.loadSource(p.media.url);engine.attachMedia(v);
       engine.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)fail();});

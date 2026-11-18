@@ -4,7 +4,8 @@ import { platform } from "./environment";
 import type { SourceStart } from "./plugins/sourceMatching";
 export type Tab = "home" | "category" | "search" | "profile";
 export type Theme = "dark" | "light";
-export type PageInput = { kind: "plugins"; focusId?: string } | { kind: "settings" } | { kind: "downloads" } | { kind: "media"; pluginId: string; mediaId: string; start?: SourceStart } | { kind: "section"; pluginId: string; sectionId: string; title?: string } | { kind: "live"; pluginId: string } | { kind: "articles"; pluginId: string } | { kind: "article"; pluginId: string; articleId: string } | { kind: "feed"; pluginId: string } | { kind: "recommendations"; pluginId: string };
+export type OfflinePlayPage = { kind: "offlinePlay"; downloadId: string; title: string; episodeLabel?: string; mediaKind: "progressiveMp4" | "hlsFmp4" | "hlsMpegTs" };
+export type PageInput = { kind: "plugins"; focusId?: string } | { kind: "settings" } | { kind: "downloads" } | OfflinePlayPage | { kind: "media"; pluginId: string; mediaId: string; start?: SourceStart } | { kind: "section"; pluginId: string; sectionId: string; title?: string } | { kind: "live"; pluginId: string } | { kind: "articles"; pluginId: string } | { kind: "article"; pluginId: string; articleId: string } | { kind: "feed"; pluginId: string } | { kind: "recommendations"; pluginId: string };
 export type Page = PageInput & { key: string };
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch { return fallback; } }
 function useApplication() {

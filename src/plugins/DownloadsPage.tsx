@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { IBack, IRefresh } from "../icons";
 import { BrowseFrame, Notice } from "./BrowsePages";
+import { useStore } from "../store";
 
 type DownloadTask = {
   id: string;
@@ -24,6 +25,7 @@ function formatBytes(value: number) {
 }
 
 export default function DownloadsPage({ onBack }: { onBack: () => void }) {
+  const app = useStore();
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const [error, setError] = useState("");
   const refresh = useCallback(async () => {
@@ -39,11 +41,17 @@ export default function DownloadsPage({ onBack }: { onBack: () => void }) {
     const timer = window.setInterval(() => void refresh(), 1000);
     return () => window.clearInterval(timer);
   }, [refresh]);
-  const play = async (id: string) => {
+  const play = async (task: DownloadTask) => {
     setError("");
     try {
-      const path = await invoke<string>("download_manage", { action: "localPath", params: { id } });
-      window.location.href = convertFileSrc(path);
+      await invoke("download_manage", { action: "localPath", params: { id: task.id } });
+      app.push({
+        kind: "offlinePlay",
+        downloadId: task.id,
+        title: task.title,
+        episodeLabel: task.episodeLabel,
+        mediaKind: task.kind,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "无法打开离线文件");
     }
@@ -73,7 +81,7 @@ export default function DownloadsPage({ onBack }: { onBack: () => void }) {
             {task.state === "running" || task.state === "queued" ? <button onClick={() => void run("pause", task.id)}>暂停</button> : null}
             {task.state === "paused" || task.state === "failed" ? <button onClick={() => void run("resume", task.id)}>继续</button> : null}
             {task.state !== "completed" && task.state !== "cancelled" ? <button onClick={() => void run("cancel", task.id)}>取消</button> : null}
-            {task.state === "completed" && <button onClick={() => void play(task.id)}>离线播放</button>}
+            {task.state === "completed" && <button onClick={() => void play(task)}>离线播放</button>}
             <button onClick={() => void run("remove", task.id)}>删除</button>
           </div>
         </li>;
