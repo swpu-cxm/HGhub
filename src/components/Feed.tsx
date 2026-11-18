@@ -207,9 +207,17 @@ export default function Feed({media, position, active=true, preparing=false, err
   useEffect(() => {
     if (isDesktop || preview || !active || !fs || !isLandscapeVideo) return;
     let live = true;
-    void setMobileOrientation(true).catch(() => { if (live) setHint("无法切换屏幕方向，请重试"); });
-    return () => { live = false; void setMobileOrientation(false).catch(() => {}); };
-  }, [isDesktop, preview, active, fs, isLandscapeVideo]);
+    void setMobileOrientation(true).catch((error: unknown) => {
+      if (!live) return;
+      setFs(false);
+      const detail = error instanceof Error ? error.message : String(error);
+      setHint(detail.trim() || "无法切换屏幕方向");
+    });
+    return () => {
+      live = false;
+      void setMobileOrientation(false).catch(() => {});
+    };
+  }, [isDesktop, preview, active, fs, isLandscapeVideo, setFs]);
 
 
   const go=(delta:number)=>{ if(!active || controlsLocked || panel) return; if(preview) delta>0 ? onNext?.() : onPrevious?.(); else delta>0 ? onNextEpisode?.() : onPreviousEpisode?.(); };

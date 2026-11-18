@@ -18,6 +18,18 @@ pub fn run() {
                     {
                         let handle = api.register_android_plugin("com.hghub.player", "OrientationPlugin")?;
                         app.manage(commands::OrientationPlugin(handle));
+                    }
+                    #[cfg(not(target_os = "android"))]
+                    let _ = (app, api);
+                    Ok(())
+                })
+                .build(),
+        )
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("app-update")
+                .setup(|app, api| {
+                    #[cfg(target_os = "android")]
+                    {
                         let update = api.register_android_plugin("com.hghub.player", "AppUpdatePlugin")?;
                         app.manage(commands::AppUpdatePlugin(update));
                     }

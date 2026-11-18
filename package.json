@@ -1,8 +1,8 @@
 {
   "name": "huangguo-client",
   "private": true,
-  "version": "0.0.6.3-swpu-install-test",
-  "androidVersionCode": 13,
+  "version": "0.0.6.4-swpu-install-test",
+  "androidVersionCode": 14,
   "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
@@ -28,7 +28,8 @@
     "test:offline-playback": "node scripts/test-offline-playback.mjs",
     "test:offline-hls-loader": "node scripts/test-offline-hls-loader.mjs",
     "test:app-update-apk": "node scripts/test-app-update-apk.mjs",
-    "test:app-update-android-deser": "node scripts/test-app-update-android-deser.mjs"
+    "test:app-update-android-deser": "node scripts/test-app-update-android-deser.mjs",
+    "test:orientation-android-deser": "node scripts/test-orientation-android-deser.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

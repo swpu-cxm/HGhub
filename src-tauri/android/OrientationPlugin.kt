@@ -15,7 +15,7 @@ import app.tauri.plugin.Plugin
 @InvokeArg
 @Keep
 class OrientationArgs {
-  var landscape: Boolean = false
+  @JvmField var landscape: Boolean = false
 }
 
 @TauriPlugin

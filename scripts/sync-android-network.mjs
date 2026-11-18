@@ -19,11 +19,11 @@ if (existsSync(manifest)) {
   ]) {
     copyFileSync(join(androidSrc, file), join(java, file));
   }
-  const testSrc = join(androidSrc, "AppUpdateArgsDeserTest.kt");
-  if (existsSync(testSrc)) {
-    const testDest = join(root, "src-tauri/gen/android/app/src/test/java/com/hghub/player");
-    mkdirSync(testDest, { recursive: true });
-    copyFileSync(testSrc, join(testDest, "AppUpdateArgsDeserTest.kt"));
+  const testDest = join(root, "src-tauri/gen/android/app/src/test/java/com/hghub/player");
+  mkdirSync(testDest, { recursive: true });
+  for (const testFile of ["AppUpdateArgsDeserTest.kt", "OrientationArgsDeserTest.kt"]) {
+    const testSrc = join(androidSrc, testFile);
+    if (existsSync(testSrc)) copyFileSync(testSrc, join(testDest, testFile));
   }
   mkdirSync(join(main, "res/xml"), { recursive: true });
   copyFileSync(join(androidSrc, "network_security_config.xml"), join(main, "res/xml/network_security_config.xml"));
