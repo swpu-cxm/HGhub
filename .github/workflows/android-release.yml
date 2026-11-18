@@ -88,7 +88,13 @@ jobs:
           workspaces: src-tauri -> target
           key: android-private
 
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri android init --ci
+      - run: node scripts/sync-android-network.mjs
+      - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
+
       - name: 确认签名 Secrets 已配置（不输出值）
+        id: android_signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -98,17 +104,19 @@ jobs:
           set -euo pipefail
           miss=0
           for name in KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD; do
-            if [ -z "${!name:-}" ]; then echo "::error::$name 未在仓库 Secrets 中配置"; miss=1; fi
+            if [ -z "${!name:-}" ]; then echo "::warning::$name 未在仓库 Secrets 中配置"; miss=1; fi
           done
-          [ "$miss" -eq 0 ] || exit 1
-          echo "签名 Secrets 四项均已配置（GitHub 不允许回读值，此处仅检测非空）。"
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm tauri android init --ci
-      - run: node scripts/sync-android-network.mjs
-      - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
+          if [ "$miss" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "签名 Secrets 四项均已配置（GitHub 不允许回读值，此处仅检测非空）。"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Android APK 已编译，但未配置签名 Secrets，无法发布正式签名包。"
+            exit 1
+          fi
 
       - name: 签名并校验 APK
+        if: steps.android_signing.outputs.configured == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
