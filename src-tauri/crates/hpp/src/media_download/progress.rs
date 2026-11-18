@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub enum DownloadKind {
     ProgressiveMp4,
     HlsFmp4,
+    HlsMpegTs,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

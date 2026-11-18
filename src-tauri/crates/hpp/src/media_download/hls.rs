@@ -13,7 +13,7 @@ pub async fn detect_fmp4_hls(
     Ok(playlist.contains("#EXT-X-MAP:") && !playlist.contains(".ts\n") && !playlist.contains(".ts\r"))
 }
 
-async fn resolve_media_playlist(
+pub(super) async fn resolve_media_playlist(
     client: &Client,
     base: &str,
     body: &str,
@@ -261,7 +261,7 @@ async fn head_size(client: &Client, url: &str, headers: &HashMap<String, String>
     Ok(resp.content_length().unwrap_or(0))
 }
 
-async fn fetch_text(
+pub(super) async fn fetch_text(
     client: &Client,
     url: &str,
     headers: &HashMap<String, String>,
@@ -271,7 +271,7 @@ async fn fetch_text(
     String::from_utf8(bytes).map_err(|_| PluginError::invalid("HLS 清单编码无效"))
 }
 
-async fn fetch_bytes(
+pub(super) async fn fetch_bytes(
     client: &Client,
     url: &str,
     headers: &HashMap<String, String>,
@@ -305,7 +305,7 @@ async fn fetch_bytes(
     Ok(bytes.to_vec())
 }
 
-fn resolve_url(base: &str, rel: &str) -> Result<String> {
+pub(super) fn resolve_url(base: &str, rel: &str) -> Result<String> {
     Url::parse(base)
         .and_then(|b| b.join(rel))
         .map(|u| u.to_string())

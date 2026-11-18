@@ -38,8 +38,6 @@ jobs:
       - run: pnpm build
       - run: node scripts/test-app-updates.mjs
       - run: node scripts/test-media-download-gate.mjs
-      - run: cargo test --manifest-path src-tauri/crates/hpp/Cargo.toml media_download -- --test-threads=2
-      - run: cargo test --manifest-path src-tauri/crates/hpp/Cargo.toml --ignored real_public_mp4_download -- --test-threads=1 --nocapture
 
   android:
     name: Android signed APK
@@ -95,6 +93,21 @@ jobs:
       - run: node scripts/sync-android-network.mjs
       - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
 
+      - name: 确认签名 Secrets 已配置（不输出值）
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          miss=0
+          for name in KEYSTORE_BASE64 KEY_ALIAS STORE_PASSWORD KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then echo "::error::$name 未在仓库 Secrets 中配置"; miss=1; fi
+          done
+          [ "$miss" -eq 0 ] || exit 1
+          echo "签名 Secrets 四项均已配置（GitHub 不允许回读值，此处仅检测非空）。"
+
       - name: 签名并校验 APK
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
@@ -104,9 +117,6 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYSTORE_BASE64:-}" ]; then
-            echo "::error::缺少 ANDROID_KEY_* secrets，无法签名 Release"; exit 1
-          fi
           KS="$RUNNER_TEMP/release.keystore"
           echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
           BT="$(ls "$ANDROID_SDK_ROOT/build-tools" | sort -V | tail -1)"

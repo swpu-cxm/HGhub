@@ -18,6 +18,7 @@ env:
 jobs:
   # ================= Windows：NSIS 安装包 + 便携包 =================
   windows:
+    if: github.repository == 'Minireel/HGhub'
     name: Windows (setup + portable)
     runs-on: windows-latest
     steps:
@@ -71,6 +72,7 @@ jobs:
 
   # ================= Android：按 ABI 分包 + 签名 =================
   android:
+    if: github.repository == 'Minireel/HGhub'
     name: Android (split per ABI)
     runs-on: ubuntu-latest
     steps:
@@ -166,6 +168,7 @@ jobs:
 
   # ================= macOS：三种架构的 DMG + APP =================
   macos:
+    if: github.repository == 'Minireel/HGhub'
     name: macOS (${{ matrix.name }})
     runs-on: macos-latest
     strategy:
@@ -238,6 +241,7 @@ jobs:
 
   # ================= iOS：未签名 IPA =================
   ios:
+    if: github.repository == 'Minireel/HGhub'
     name: iOS Build (IPA)
     runs-on: macos-latest
     env:
@@ -308,6 +312,7 @@ jobs:
 
   # ================= Linux：DEB + AppImage =================
   linux:
+    if: github.repository == 'Minireel/HGhub'
     name: Linux (deb + appimage)
     runs-on: ubuntu-22.04
     steps:
@@ -365,6 +370,7 @@ jobs:
 
   # ================= 发布 =================
   release:
+    if: github.repository == 'Minireel/HGhub'
     name: Publish GitHub Release
     needs: [windows, android, macos, ios, linux]
     if: startsWith(github.ref, 'refs/tags/v')

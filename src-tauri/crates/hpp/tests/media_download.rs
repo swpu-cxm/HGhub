@@ -64,6 +64,15 @@ async fn fixture(
             b"\0\0\0\x18stypmsdh\0\0\0\x08moof",
             &range,
         ),
+        "/hls-ts/master.m3u8" => text_body(
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nvariant.m3u8\n",
+            method,
+        ),
+        "/hls-ts/variant.m3u8" => text_body(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\n0.ts\n#EXTINF:2.0,\n1.ts\n#EXT-X-ENDLIST\n",
+            method,
+        ),
+        "/hls-ts/0.ts" | "/hls-ts/1.ts" => serve_bytes(method, &ts_packet(), &range),
         _ => Response::builder().status(404).body(Body::empty()).unwrap(),
     }
 }
@@ -123,6 +132,12 @@ async fn spawn_server(seen: Seen) -> String {
         axum::serve(listener, app).await.unwrap();
     });
     base
+}
+
+fn ts_packet() -> Vec<u8> {
+    let mut v = vec![0x47u8; 188];
+    v[1] = 0x40;
+    v
 }
 
 fn ffprobe_ok(path: &std::path::Path) -> bool {
@@ -217,6 +232,62 @@ async fn fmp4_hls_becomes_playable_mp4() {
     assert_eq!(done.state, DownloadState::Completed, "{:?}", done.error);
     let out = dir.path().join(done.output_rel.as_ref().unwrap());
     assert!(out.exists());
+}
+
+#[tokio::test]
+async fn mpegts_hls_offline_package() {
+    let base = spawn_server(Default::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::open(dir.path().to_path_buf()).unwrap();
+    let task = manager
+        .enqueue(
+            "ts-hls".into(),
+            None,
+            format!("{base}/hls-ts/master.m3u8"),
+            Default::default(),
+            Some(DownloadKind::HlsMpegTs),
+        )
+        .await
+        .unwrap();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        if manager
+            .list()
+            .await
+            .into_iter()
+            .any(|t| t.id == task.id && t.state == DownloadState::Completed)
+        {
+            break;
+        }
+    }
+    let done = manager.list().await.into_iter().find(|t| t.id == task.id).unwrap();
+    assert_eq!(done.state, DownloadState::Completed, "{:?}", done.error);
+    let index = dir.path().join(done.output_rel.as_ref().unwrap());
+    assert!(index.is_file());
+    assert!(std::fs::read_to_string(&index).unwrap().contains("seg00000.ts"));
+}
+
+#[tokio::test]
+#[ignore = "真实公网集成测试：需要网络"]
+async fn real_public_mpegts_hls_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = DownloadManager::open(dir.path().to_path_buf()).unwrap();
+    let url = "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8";
+    let task = manager
+        .enqueue("apple-ts".into(), None, url.into(), Default::default(), Some(DownloadKind::HlsMpegTs))
+        .await
+        .unwrap();
+    for _ in 0..180 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let state = manager.list().await.into_iter().find(|t| t.id == task.id).unwrap().state;
+        if state == DownloadState::Completed || state == DownloadState::Failed {
+            break;
+        }
+    }
+    let done = manager.list().await.into_iter().find(|t| t.id == task.id).unwrap();
+    assert_eq!(done.state, DownloadState::Completed, "{:?}", done.error);
+    let index = dir.path().join(done.output_rel.as_ref().unwrap());
+    assert!(ffprobe_ok(&index));
 }
 
 #[tokio::test]

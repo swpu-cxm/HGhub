@@ -1,5 +1,6 @@
 use super::{
     hls::{self, download_fmp4_hls, download_progressive, detect_fmp4_hls},
+    hls_mpegts::{self, detect_mpegts_hls, download_mpegts_hls},
     progress::{DownloadKind, DownloadState, DownloadTask},
     store::DownloadStore,
 };
@@ -76,16 +77,7 @@ impl DownloadManager {
         }
         let kind = match kind {
             Some(k) => k,
-            None => {
-                if detect_fmp4_hls(&self.inner.client, &source_url, &headers)
-                    .await
-                    .unwrap_or(false)
-                {
-                    DownloadKind::HlsFmp4
-                } else {
-                    DownloadKind::ProgressiveMp4
-                }
-            }
+            None => classify_url(&self.inner.client, &source_url, &headers).await,
         };
         let id = Uuid::new_v4().to_string();
         let ts = now();
@@ -126,10 +118,38 @@ impl DownloadManager {
         self.inner.store.save(&tasks)?;
         drop(tasks);
         for rel in [output, temp].into_iter().flatten() {
-            let path = self.inner.root.join(rel);
-            let _ = std::fs::remove_file(path);
+            if rel.contains("pkg_") || rel.ends_with(".m3u8") {
+                let _ = hls_mpegts::remove_package(&self.inner.root, &rel);
+            } else {
+                let path = self.inner.root.join(rel);
+                let _ = std::fs::remove_file(path);
+                let part = self.inner.root.join(format!("offline/.{}.part", id));
+                let _ = std::fs::remove_file(part);
+            }
         }
+        let pkg = self.inner.root.join(format!("offline/pkg_{id}"));
+        let _ = std::fs::remove_dir_all(pkg);
         Ok(())
+    }
+
+    pub fn local_playback_path(&self, id: &str) -> Result<std::path::PathBuf> {
+        let tasks = self.inner.tasks.lock().unwrap();
+        let task = tasks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| PluginError::invalid("找不到下载任务"))?;
+        if task.state != DownloadState::Completed {
+            return Err(PluginError::invalid("任务尚未完成"));
+        }
+        let rel = task
+            .output_rel
+            .as_ref()
+            .ok_or_else(|| PluginError::internal("缺少输出路径"))?;
+        let path = self.inner.root.join(rel);
+        if !path.exists() {
+            return Err(PluginError::invalid("离线文件已不存在"));
+        }
+        Ok(path)
     }
 
     pub async fn resume_interrupted(&self) {
@@ -219,14 +239,19 @@ impl DownloadManager {
             .lock()
             .unwrap()
             .insert(id.to_string(), flag.clone());
+        let is_ts = snapshot.kind == DownloadKind::HlsMpegTs;
+        let pkg_rel = format!("offline/pkg_{id}");
+        let output_rel = snapshot.output_rel.clone().unwrap_or_else(|| {
+            if is_ts {
+                format!("{pkg_rel}/index.m3u8")
+            } else {
+                format!("offline/{}.mp4", sanitize(&snapshot.title))
+            }
+        });
         let temp_rel = snapshot
             .temp_rel
             .clone()
-            .unwrap_or_else(|| format!("offline/.{}.part", id));
-        let output_rel = snapshot
-            .output_rel
-            .clone()
-            .unwrap_or_else(|| format!("offline/{}.mp4", sanitize(&snapshot.title)));
+            .unwrap_or_else(|| if is_ts { pkg_rel.clone() } else { format!("offline/.{}.part", id) });
         let temp_path = self.inner.root.join(&temp_rel);
         let output_path = self.inner.root.join(&output_rel);
         {
@@ -237,10 +262,14 @@ impl DownloadManager {
             }
             self.inner.store.save(&tasks)?;
         }
-        let resume_from = temp_path.metadata().map(|m| m.len()).unwrap_or(0);
+        let resume_from = if is_ts {
+            0
+        } else {
+            temp_path.metadata().map(|m| m.len()).unwrap_or(0)
+        };
         let noop = |_: u64, _: Option<u64>| !flag.load(Ordering::Relaxed);
         let mut attempt = 0u32;
-        let result = loop {
+        let result: Result<u64> = loop {
             attempt += 1;
             let mut progress = noop;
             let run = match snapshot.kind {
@@ -268,9 +297,20 @@ impl DownloadManager {
                     )
                     .await
                 }
+                DownloadKind::HlsMpegTs => {
+                    download_mpegts_hls(
+                        &self.inner.client,
+                        &snapshot.source_url,
+                        &snapshot.headers,
+                        &temp_path,
+                        &mut progress,
+                        &flag,
+                    )
+                    .await
+                }
             };
             match run {
-                Ok(_) => break Ok(()),
+                Ok(bytes) => break Ok(bytes),
                 Err(e) if e.code == "CANCELLED" => break Err(e),
                 Err(e) if attempt >= MAX_RETRIES => break Err(e),
                 Err(_) => {
@@ -280,13 +320,19 @@ impl DownloadManager {
         };
         self.inner.cancel_flags.lock().unwrap().remove(id);
         match result {
-            Ok(()) => {
-                std::fs::rename(&temp_path, &output_path)?;
-                hls::validate_mp4_atom(&std::fs::read(&output_path)?)?;
+            Ok(written) => {
+                let bytes_done = if snapshot.kind == DownloadKind::HlsMpegTs {
+                    hls_mpegts::validate_offline_package(&temp_path)?;
+                    written
+                } else {
+                    std::fs::rename(&temp_path, &output_path)?;
+                    hls::validate_mp4_atom(&std::fs::read(&output_path)?)?;
+                    written
+                };
                 let mut tasks = self.inner.tasks.lock().unwrap();
                 if let Some(t) = tasks.iter_mut().find(|t| t.id == id) {
                     t.state = DownloadState::Completed;
-                    t.bytes_done = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+                    t.bytes_done = bytes_done;
                     t.updated_at = now();
                     t.error = None;
                 }
@@ -310,6 +356,28 @@ impl DownloadManager {
         }
         Ok(())
     }
+}
+
+async fn classify_url(
+    client: &reqwest::Client,
+    source_url: &str,
+    headers: &HashMap<String, String>,
+) -> DownloadKind {
+    if source_url.contains(".m3u8") || source_url.contains("mpegurl") {
+        if detect_fmp4_hls(client, source_url, headers)
+            .await
+            .unwrap_or(false)
+        {
+            return DownloadKind::HlsFmp4;
+        }
+        if detect_mpegts_hls(client, source_url, headers)
+            .await
+            .unwrap_or(false)
+        {
+            return DownloadKind::HlsMpegTs;
+        }
+    }
+    DownloadKind::ProgressiveMp4
 }
 
 fn sanitize(name: &str) -> String {

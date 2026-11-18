@@ -68,6 +68,12 @@ pub async fn download_manage(
             manager.remove(id).await?;
             Ok(Value::Null)
         }
+        "localPath" => {
+            let id = params["id"]
+                .as_str()
+                .ok_or_else(|| PluginError::invalid("缺少 id"))?;
+            Ok(json!(manager.local_playback_path(id)?.to_string_lossy()))
+        }
         _ => Err(PluginError::new("UNSUPPORTED", "未知下载操作")),
     }
 }
