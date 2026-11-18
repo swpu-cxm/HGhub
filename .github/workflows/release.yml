@@ -370,10 +370,9 @@ jobs:
 
   # ================= 发布 =================
   release:
-    if: github.repository == 'Minireel/HGhub'
     name: Publish GitHub Release
     needs: [windows, android, macos, ios, linux]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.repository == 'Minireel/HGhub' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
