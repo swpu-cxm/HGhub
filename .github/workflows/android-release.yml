@@ -93,6 +93,14 @@ jobs:
       - run: node scripts/sync-android-network.mjs
       - run: pnpm tauri android build --apk --split-per-abi --target aarch64 armv7 x86_64
 
+      - name: 上传未签名 APK（可供离线签名）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unsigned
+          if-no-files-found: ignore
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*-release*.apk
+
       - name: 确认签名 Secrets 已配置（不输出值）
         id: android_signing
         env:
@@ -139,6 +147,7 @@ jobs:
               --v4-signing-enabled false --out "$out" "$f"
             "$APKSIGNER" verify --print-certs "$out" | head -5
             sha256sum "$out" | tee "checksums/HGhub_${VERSION}_${abi}.apk.sha256"
+            node scripts/verify-android-apk-cert.mjs "$out"
             found=$((found+1))
           done
           rm -f "$KS"
